@@ -18,6 +18,7 @@ object RulesStore {
     val geoipCn = RuleAsset("rules/geoip-cn.srs", "geoip-cn.srs")
     val geositeCn = RuleAsset("rules/geosite-cn.srs", "geosite-cn.srs")
     val adsAll = RuleAsset("rules/category-ads-all.srs", "category-ads-all.srs")
+    val geolocationNotCn = RuleAsset("rules/geosite-geolocation-!cn.srs", "geosite-geolocation-!cn.srs")
 
     val dir: File
         get() = File(InterstellarApplication.application.filesDir, DIR_NAME).also { it.mkdirs() }
@@ -32,7 +33,9 @@ object RulesStore {
         copyIfNeeded(context, geoipCn)
         copyIfNeeded(context, geositeCn)
         copyIfNeeded(context, adsAll)
-        return fileOf(geoipCn).isFile && fileOf(geositeCn).isFile && fileOf(adsAll).isFile
+        copyIfNeeded(context, geolocationNotCn)
+        return fileOf(geoipCn).isFile && fileOf(geositeCn).isFile && fileOf(adsAll).isFile &&
+            fileOf(geolocationNotCn).isFile
     }
 
     private fun copyIfNeeded(context: Context, asset: RuleAsset) {

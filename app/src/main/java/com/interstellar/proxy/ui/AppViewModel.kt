@@ -131,6 +131,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val _proxyScope = MutableStateFlow(readProxyScope())
     val proxyScope: StateFlow<ProxyScope> = _proxyScope
 
+    /** True while a rule/geodata file update is in flight (spinner in the UI). */
+    private val _ruleFilesUpdating = MutableStateFlow(false)
+    val ruleFilesUpdating: StateFlow<Boolean> = _ruleFilesUpdating
+
     private fun readProxyScope() = ProxyScope(
         whitelist = Settings.perAppProxyMode == Settings.PER_APP_PROXY_INCLUDE,
         count = Settings.perAppProxyList.size,
@@ -837,12 +841,46 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+     * Downloads the latest rule/geodata files for the active core, then
+     * reloads so the fresh files take effect immediately: sing-box re-reads
+     * local rule-sets on service reload; sidecars get a full respawn
+     * (mihomo/xray only load geodata at process spawn).
+     */
+    fun updateRuleFiles() {
+        if (_ruleFilesUpdating.value) return
+        _ruleFilesUpdating.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val summary = com.interstellar.proxy.data.net.GeoRuleUpdater.update(Settings.coreKind)
+                _message.value = summary
+                val config = SubscriptionRepository.regenerateActiveConfig()
+                if (config != null && _status.value == Status.Started) {
+                    when (Settings.coreKind) {
+                        CoreKind.MIHOMO -> runCatching {
+                            com.interstellar.proxy.core.MihomoCore.Holder.instance?.restartFromConfigStore()
+                        }
+
+                        CoreKind.XRAY -> runCatching {
+                            com.interstellar.proxy.core.XrayCore.Holder.instance?.restartFromConfigStore()
+                        }
+
+                        CoreKind.SINGBOX -> runCatching { CommandTarget.standaloneClient().serviceReload() }
+                    }
+                }
+            } catch (e: Exception) {
+                _message.value = "规则文件更新失败:${e.message}"
+            } finally {
+                _ruleFilesUpdating.value = false
+            }
+        }
+    }
+
+    /**
      * Switch the active engine: stop the running service (an in-flight core
      * can't morph into another), regenerate the config for the new core and
      * start it again.
      */
-    fun switchCore(kind: CoreKind) {
-        if (Settings.coreKind == kind) return
+    fun switchCore(kind: CoreKind) {        if (Settings.coreKind == kind) return
         viewModelScope.launch(Dispatchers.IO) {
             val wasRunning = _status.value == Status.Started || _status.value == Status.Starting
             if (wasRunning) {

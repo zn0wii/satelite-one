@@ -40,6 +40,10 @@ object ConfigBuilder {
         val mode: OutboundMode = OutboundMode.RULE,
         val bypassLan: Boolean = true,
         val bypassCn: Boolean = true,
+        /** Route geolocation-!cn (overseas) domains through the proxy group (rule mode). */
+        val overseasProxy: Boolean = false,
+        /** Rule-mode fallback for unmatched traffic: direct instead of the proxy group. */
+        val fallbackDirect: Boolean = false,
         val adBlock: Boolean = true,
         val selectedNodeTag: String? = null,
         val mixedPortEnabled: Boolean = true,
@@ -687,6 +691,17 @@ object ConfigBuilder {
                     )
                 }
             }
+            // overseas (geolocation-!cn) domains ride the proxy — matched
+            // before the CN bypass so whitelist-style routing wins for a
+            // domain that appears in both lists
+            if (options.mode == OutboundMode.RULE && options.overseasProxy) {
+                add(
+                    buildJsonObject {
+                        putJsonArray("rule_set") { add("geosite-geolocation-!cn") }
+                        put("outbound", GROUP_TAG)
+                    },
+                )
+            }
             if (options.mode == OutboundMode.RULE && options.bypassCn) {
                 add(
                     buildJsonObject {
@@ -703,13 +718,18 @@ object ConfigBuilder {
             if (options.adBlock) {
                 add(ruleSetJson("category-ads-all", com.interstellar.proxy.data.RulesStore.adsAll))
             }
+            if (options.mode == OutboundMode.RULE && options.overseasProxy) {
+                add(ruleSetJson("geosite-geolocation-!cn", com.interstellar.proxy.data.RulesStore.geolocationNotCn))
+            }
             if (options.mode == OutboundMode.RULE && options.bypassCn) {
                 add(ruleSetJson("geosite-cn", com.interstellar.proxy.data.RulesStore.geositeCn))
                 add(ruleSetJson("geoip-cn", com.interstellar.proxy.data.RulesStore.geoipCn))
             }
         }
-        put("final", when (options.mode) {
-            OutboundMode.DIRECT -> DIRECT_TAG
+        put("final", when {
+            options.mode == OutboundMode.DIRECT -> DIRECT_TAG
+            // whitelist-style: only rule-matched domains ride the proxy
+            options.mode == OutboundMode.RULE && options.fallbackDirect -> DIRECT_TAG
             else -> GROUP_TAG
         })
         put("auto_detect_interface", true)
@@ -735,7 +755,7 @@ object ConfigBuilder {
                 put("tag", tag)
                 put("type", "remote")
                 put("format", "binary")
-                put("url", "https://raw.githubusercontent.com/SagerNet/sing-${if (tag.startsWith("geosite")) "geosite" else "geoip"}/rule-set/$tag.srs")
+                put("url", "https://raw.githubusercontent.com/SagerNet/sing-${if (tag.startsWith("geoip")) "geoip" else "geosite"}/rule-set/$tag.srs")
                 put("download_detour", DIRECT_TAG)
             }
         }

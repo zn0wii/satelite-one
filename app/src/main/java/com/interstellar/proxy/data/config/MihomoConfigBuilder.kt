@@ -491,11 +491,18 @@ object MihomoConfigBuilder {
                 values.forEach { value -> add("$prefix$value,$outbound") }
             }
         }
+        // overseas (geolocation-!cn) domains ride the proxy — matched before
+        // the CN bypass so whitelist-style routing wins for overlapping domains
+        if (options.mode == ConfigBuilder.OutboundMode.RULE && options.overseasProxy) {
+            add("GEOSITE,geolocation-!cn,$GROUP_TAG")
+        }
         if (options.mode == ConfigBuilder.OutboundMode.RULE && options.bypassCn) {
             add("GEOSITE,cn,$DIRECT")
             add("GEOIP,cn,$DIRECT,no-resolve")
         }
-        add("MATCH,$GROUP_TAG")
+        // whitelist-style fallback: only rule-matched domains ride the proxy
+        val fallback = if (options.mode == ConfigBuilder.OutboundMode.RULE && options.fallbackDirect) DIRECT else GROUP_TAG
+        add("MATCH,$fallback")
     }
 
     /** Route exclusions for the sidecar VPN (node servers + DNS upstreams). */

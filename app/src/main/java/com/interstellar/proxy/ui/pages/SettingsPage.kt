@@ -20,6 +20,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -494,6 +495,8 @@ fun ProxySettingsPage(viewModel: com.interstellar.proxy.ui.AppViewModel, onOpen:
         GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = 6.dp) {
             var bypassLan by remember { mutableStateOf(Settings.bypassLanEnabled) }
             var bypassCn by remember { mutableStateOf(Settings.bypassCnEnabled) }
+            var overseasProxy by remember { mutableStateOf(Settings.overseasProxyEnabled) }
+            var fallbackDirect by remember { mutableStateOf(Settings.fallbackDirectEnabled) }
             var adBlock by remember { mutableStateOf(Settings.adBlockEnabled) }
             var regionGroups by remember { mutableStateOf(Settings.regionGroupsEnabled) }
             PrefToggleRow(
@@ -513,6 +516,27 @@ fun ProxySettingsPage(viewModel: com.interstellar.proxy.ui.AppViewModel, onOpen:
                 onChange = {
                     bypassCn = it
                     Settings.bypassCnEnabled = it
+                    viewModel.refreshProxyConfig()
+                },
+            )
+            PrefToggleRow(
+                title = "海外网站走代理",
+                desc = "非大陆域名走代理(geolocation-!cn,仅规则模式)",
+                checked = overseasProxy,
+                onChange = {
+                    overseasProxy = it
+                    Settings.overseasProxyEnabled = it
+                    viewModel.refreshProxyConfig()
+                },
+            )
+            PrefSegRow(
+                title = "未命中规则",
+                desc = "未被任何规则匹配的流量走向(仅规则模式)",
+                items = listOf("代理", "直连"),
+                selected = if (fallbackDirect) 1 else 0,
+                onSelect = { i ->
+                    fallbackDirect = i == 1
+                    Settings.fallbackDirectEnabled = i == 1
                     viewModel.refreshProxyConfig()
                 },
             )
@@ -537,7 +561,7 @@ fun ProxySettingsPage(viewModel: com.interstellar.proxy.ui.AppViewModel, onOpen:
                 },
             )
         }
-        IosSectionFooter("修改后立即重新生成配置,内核运行中自动热重载。")
+        IosSectionFooter("海外走代理 + 兜底直连 = 白名单模式:只有命中规则的域名走代理,其余直连。")
 
         Spacer(Modifier.height(22.dp))
 
@@ -553,6 +577,61 @@ fun ProxySettingsPage(viewModel: com.interstellar.proxy.ui.AppViewModel, onOpen:
             )
         }
         IosSectionFooter("手动规则优先级最高,先于大陆绕过等内置规则匹配。")
+
+        Spacer(Modifier.height(22.dp))
+
+        // ---- 规则文件 ----
+        PrefSectionLabel("规则文件")
+        GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = 6.dp) {
+            val updating by viewModel.ruleFilesUpdating.collectAsState()
+            PrefRowShell(
+                title = "更新规则文件",
+                desc = when (Settings.coreKind) {
+                    com.interstellar.proxy.core.CoreKind.MIHOMO ->
+                        "GEO 数据库 geosite + geoip(${Settings.coreKind.displayName},约 12 MB)"
+                    com.interstellar.proxy.core.CoreKind.XRAY ->
+                        "GEO 数据库 geosite + geoip(${Settings.coreKind.displayName},约 25 MB)"
+                    else -> "内置规则集 srs(${Settings.coreKind.displayName},约 2 MB)"
+                },
+            ) {
+                if (updating) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = colors.primary,
+                    )
+                } else {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(colors.primary.copy(alpha = 0.13f))
+                            .border(1.dp, colors.primary.copy(alpha = 0.55f), RoundedCornerShape(50))
+                            .pressableClick { viewModel.updateRuleFiles() }
+                            .padding(horizontal = 16.dp, vertical = 7.dp),
+                    ) {
+                        Text(
+                            "更新",
+                            color = colors.primary,
+                            fontSize = 13.sp,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                        )
+                    }
+                }
+            }
+        }
+        val updatedAt = Settings.ruleFilesUpdatedAt
+        IosSectionFooter(
+            "从 GitHub 下载最新规则,内核运行时经当前节点下载。" +
+                if (updatedAt > 0) {
+                    "上次更新:" + java.text.SimpleDateFormat(
+                        "yyyy-MM-dd HH:mm",
+                        java.util.Locale.getDefault(),
+                    ).format(java.util.Date(updatedAt))
+                } else {
+                    "尚未更新过"
+                },
+        )
 
         Spacer(Modifier.height(24.dp))
     }

@@ -61,4 +61,37 @@ class ConfigBuilderTest {
             .first { it["tag"]!!.jsonPrimitive.content == "dns-remote" }
         check(remote["detour"]!!.jsonPrimitive.content == "proxy") { "dns-remote detour" }
     }
+
+    @Test
+    fun `rule-mode fallback direct sends unmatched traffic to the direct outbound`() {
+        val json = kotlinx.serialization.json.Json.parseToJsonElement(
+            ConfigBuilder.build(
+                nodes,
+                ConfigBuilder.BuildOptions(
+                    mode = ConfigBuilder.OutboundMode.RULE,
+                    adBlock = false,
+                    bypassCn = false,
+                    fallbackDirect = true,
+                ),
+            ),
+        ).jsonObject
+        check(json["route"]!!.jsonObject["final"]!!.jsonPrimitive.content == "direct") {
+            "fallbackDirect must set route.final to the direct outbound"
+        }
+    }
+
+    @Test
+    fun `default rule mode and global mode keep the proxy as fallback`() {
+        for (mode in listOf(ConfigBuilder.OutboundMode.RULE, ConfigBuilder.OutboundMode.GLOBAL)) {
+            val json = kotlinx.serialization.json.Json.parseToJsonElement(
+                ConfigBuilder.build(
+                    nodes,
+                    ConfigBuilder.BuildOptions(mode = mode, adBlock = false, bypassCn = false),
+                ),
+            ).jsonObject
+            check(json["route"]!!.jsonObject["final"]!!.jsonPrimitive.content == "proxy") {
+                "$mode must keep the proxy group as route.final"
+            }
+        }
+    }
 }

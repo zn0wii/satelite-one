@@ -241,6 +241,19 @@ object XrayConfigBuilder {
                     .put("outboundTag", "block"),
             )
         }
+        // overseas (geolocation-!cn) domains ride the proxy — matched before
+        // the CN bypass so whitelist-style routing wins for overlapping domains
+        if (options.overseasProxy) {
+            val overseas = JSONObject().put("type", "field")
+                .put("domain", JSONArray(listOf("geosite:geolocation-!cn")))
+            add(
+                if (useBalancer) {
+                    overseas.put("balancerTag", BALANCER_TAG)
+                } else {
+                    overseas.put("outboundTag", PROXY_TAG)
+                },
+            )
+        }
         if (options.bypassCn) {
             add(
                 JSONObject().put("type", "field")
@@ -253,7 +266,12 @@ object XrayConfigBuilder {
                     .put("outboundTag", "direct"),
             )
         }
-        add(catchAllProxyRule(useBalancer))
+        if (options.fallbackDirect) {
+            // whitelist-style: only rule-matched domains ride the proxy
+            add(JSONObject().put("type", "field").put("network", "tcp,udp").put("outboundTag", "direct"))
+        } else {
+            add(catchAllProxyRule(useBalancer))
+        }
     }
 
     private fun catchAllProxyRule(useBalancer: Boolean): JSONObject {

@@ -91,4 +91,26 @@ class MihomoConfigBuilderTest {
         val yaml = MihomoConfigBuilder.build(nodes, options.copy(includeTun = false))
         check(!yaml.contains("\ntun:")) { "tun block must be absent" }
     }
+
+    private fun rulesOf(opts: ConfigBuilder.BuildOptions): List<String> =
+        YamlToJson.convert(MihomoConfigBuilder.build(nodes, opts))!!
+            .jsonObject["rules"]!!.jsonArray.map { it.jsonPrimitive.content }
+
+    @Test
+    fun `overseas proxy adds geolocation-!cn before the cn bypass`() {
+        val rules = rulesOf(options.copy(overseasProxy = true))
+        val overseas = rules.indexOfFirst { it.startsWith("GEOSITE,geolocation-!cn,") }
+        val cn = rules.indexOfFirst { it == "GEOSITE,cn,DIRECT" }
+        check(overseas >= 0) { "geolocation-!cn rule missing" }
+        check(cn < 0 || overseas < cn) { "overseas rule must match before the CN bypass" }
+        check(rules[overseas] == "GEOSITE,geolocation-!cn,proxy") { rules[overseas] }
+    }
+
+    @Test
+    fun `fallback direct makes MATCH go DIRECT and keeps global mode proxied`() {
+        val rule = rulesOf(options.copy(fallbackDirect = true))
+        check(rule.last() == "MATCH,DIRECT") { "final rule: ${rule.last()}" }
+        val global = rulesOf(options.copy(mode = ConfigBuilder.OutboundMode.GLOBAL, fallbackDirect = true))
+        check(global.last() == "MATCH,proxy") { "global ignores the fallback: ${global.last()}" }
+    }
 }

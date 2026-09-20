@@ -205,6 +205,17 @@ class MihomoCore(
         applyConfig(content, lastOverrides ?: CoreOverrides(false, false, true, emptySet()))
     }
 
+    /**
+     * Full process restart instead of an API hot reload — for changes the
+     * running process can't pick up (geodata files are read at spawn).
+     */
+    suspend fun restartFromConfigStore() {
+        val content = com.interstellar.proxy.data.ConfigStore.readActiveConfig() ?: return
+        sidecar?.destroy()
+        sidecar = null
+        applyConfig(content, lastOverrides ?: CoreOverrides(false, false, true, emptySet()))
+    }
+
     // ---- helpers ----
 
     /** mihomo select groups have no config default — apply via API (store-selected persists it). */

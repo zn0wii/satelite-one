@@ -281,6 +281,30 @@ object Settings {
             commit()
         }
 
+    /** Route geolocation-!cn (overseas) domains through the proxy (rule mode). */
+    var overseasProxyEnabled: Boolean
+        get() = properties.getProperty("overseasProxyEnabled", "false").toBoolean()
+        set(value) {
+            properties.setProperty("overseasProxyEnabled", value.toString())
+            commit()
+        }
+
+    /** Rule-mode fallback for traffic no rule matched: true = direct, false = proxy. */
+    var fallbackDirectEnabled: Boolean
+        get() = properties.getProperty("fallbackDirectEnabled", "false").toBoolean()
+        set(value) {
+            properties.setProperty("fallbackDirectEnabled", value.toString())
+            commit()
+        }
+
+    /** Epoch millis of the last successful rule/geodata file update (0 = never). */
+    var ruleFilesUpdatedAt: Long
+        get() = properties.getProperty("ruleFilesUpdatedAt", "0")?.toLongOrNull() ?: 0L
+        set(value) {
+            properties.setProperty("ruleFilesUpdatedAt", value.toString())
+            commit()
+        }
+
     /** Block ad/tracker domains (built-in category-ads-all rule set). */
     var adBlockEnabled: Boolean
         get() = properties.getProperty("adBlockEnabled", "true").toBoolean()

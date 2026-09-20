@@ -195,6 +195,8 @@ object SubscriptionRepository {
             mode = Settings.outboundMode,
             bypassLan = Settings.bypassLanEnabled,
             bypassCn = Settings.bypassCnEnabled,
+            overseasProxy = Settings.overseasProxyEnabled,
+            fallbackDirect = Settings.fallbackDirectEnabled,
             adBlock = Settings.adBlockEnabled,
             selectedNodeTag = selectedTag,
             apiSecret = Settings.apiSecret,
