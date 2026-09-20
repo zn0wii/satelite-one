@@ -81,9 +81,18 @@ class MihomoCore(
             // hot reload: rewrite the file, then ask mihomo to re-read it
             configFile.writeText(stripTun(config))
             if (api.reload(configFile.absolutePath)) {
-                AppLog.log("mihomo", "配置已热重载")
-                applySelection(overrides)
-                return
+                // a 2xx reload can still be followed by a fatal while the new
+                // config applies — verify liveness before declaring success
+                val survived = runCatching {
+                    kotlinx.coroutines.delay(1500)
+                    sidecar?.running == true && api.version() != null
+                }.getOrDefault(false)
+                if (survived) {
+                    AppLog.log("mihomo", "配置已热重载")
+                    applySelection(overrides)
+                    return
+                }
+                AppLog.log("mihomo", "热重载后内核无响应,转为完整重启")
             }
             // API unreachable → process died between checks; fall through to respawn
             sidecar?.destroy()
@@ -246,7 +255,10 @@ class MihomoCore(
 
     companion object {
         private const val TAG = "MihomoCore"
-        const val API_PORT = 9090
+        // NOT 9090: every clash-family app defaults there, and a concurrently
+        // running one (CMFA/FlClash…) silently hijacks our API client, group
+        // polling and readiness probe — we'd read ITS groups as ours
+        const val API_PORT = 19090
         /** must match ConfigBuilder.BuildOptions.mixedPort default */
         const val MIXED_PORT = 2080
         private const val READY_POLLS = 20

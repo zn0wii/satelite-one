@@ -76,14 +76,25 @@ private data class NodeEntry(
     val label: String get() = title ?: tag
 }
 
-private fun isGroupItem(item: NodeEntry): Boolean =
-    item.tag == ConfigBuilder.AUTO_TAG || item.type == "urltest" || item.type == "selector"
+private fun isGroupItem(item: NodeEntry): Boolean {
+    // mihomo reports "Selector"/"URLTest" capitalized, libbox lowercase
+    val t = item.type.lowercase()
+    return item.tag == ConfigBuilder.AUTO_TAG || t == "urltest" || t == "selector"
+}
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun NodesPage(viewModel: AppViewModel) {
     val colors = LocalInterstellarColors.current
-    val groups by viewModel.groups.collectAsState()
+    val liveGroups by viewModel.groups.collectAsState()
+    val staticGroups by viewModel.staticGroups.collectAsState()
+    // 分组结构永远来自磁盘上的 active.json(内核无关,切订阅立即生效、
+    // 内核死掉/重启中也不会失真);内核轮询只覆盖运行时状态:
+    // delays 流 + 下面这张 tag→当前选中 的表
+    val groups = staticGroups
+    val liveSelectedByTag = remember(liveGroups) {
+        liveGroups.mapNotNull { g -> g.selected?.takeIf { it.isNotBlank() }?.let { g.tag to it } }.toMap()
+    }
     val delays by viewModel.delays.collectAsState()
     val testing by viewModel.testing.collectAsState()
     val message by viewModel.message.collectAsState()
@@ -94,10 +105,29 @@ fun NodesPage(viewModel: AppViewModel) {
     val mixIds by viewModel.mixSubscriptionIds.collectAsState()
     val storedSelected by viewModel.selectedOutboundTag.collectAsState()
     val gridView by viewModel.nodesGridView.collectAsState()
+    val smartState by viewModel.smartState.collectAsState()
     var sortMode by rememberSaveable { mutableStateOf(0) } // 0 延迟 1 名称
     var detailItem by remember { mutableStateOf<NodeEntry?>(null) }
+    // group tabs: live groups from the core (mihomo raw configs carry their
+    // own proxy-groups; rewritten configs carry ours). null = main tab.
+    var activeTab by rememberSaveable { mutableStateOf<String?>(null) }
+
+    // 虚拟 自动/智能 分组只在程序自己生成的配置结构上有意义:机场原始
+    // 配置自带自动选择分组,再插一个只会重复,且其选择目标 (auto/smart)
+    // 在原始配置里不存在,点了必然无效。判定:存在我们生成的 auto 组。
+    val autoGroup = groups.find { it.tag == ConfigBuilder.AUTO_TAG }
+    val virtualTabs = autoGroup != null
 
     val mainGroup = groups.find { it.tag == ConfigBuilder.GROUP_TAG }
+        // raw configs may not name any group "proxy" — fall back to the first
+        // selector so the page and dashboard still have a main tab
+        ?: groups.firstOrNull { it.type.equals("selector", ignoreCase = true) }
+        ?: groups.firstOrNull()
+    val currentTab: com.interstellar.proxy.core.CoreGroup? =
+        activeTab?.let { t -> groups.find { it.tag == t } } ?: mainGroup
+    val isMainTab = currentTab?.tag == mainGroup?.tag
+    val isSmartTab = virtualTabs && activeTab == ConfigBuilder.SMART_TAG
+    val tabSelectable = currentTab?.type?.equals("selector", ignoreCase = true) == true
     // the pool the generated config runs on: active sub, or the mix union
     val storedNodes = remember(subscriptions, activeId, mixEnabled, mixIds) {
         SubscriptionRepository.poolOf(subscriptions, activeId, mixEnabled, mixIds)
@@ -142,10 +172,18 @@ fun NodesPage(viewModel: AppViewModel) {
             .fillMaxSize()
             .padding(horizontal = 16.dp),
     ) {
-        PageHeader(kicker = "NODES", title = "节点")
+        // 当前节点池来源:激活订阅;Mix 则多个订阅名以 · 连接
+        val activeSub = subscriptions.find { it.id == activeId }
+        val subNote = when {
+            mixEnabled && mixIds.isNotEmpty() ->
+                subscriptions.filter { it.id in mixIds }.joinToString(" · ") { it.name }
+            activeSub != null -> activeSub.name
+            else -> null
+        }
+        PageHeader(kicker = "NODES", title = "节点", titleNote = subNote)
 
-        val liveItems = remember(mainGroup) {
-            mainGroup?.items ?: emptyList()
+        val liveItems = remember(currentTab) {
+            currentTab?.items ?: emptyList()
         }
         // tag → full node model, so cards and the detail sheet can show protocol info
         val nodeByTag = remember(storedNodes) {
@@ -177,13 +215,44 @@ fun NodesPage(viewModel: AppViewModel) {
             }
         }
         val nodeItems = remember(allItems) { allItems.filterNot(::isGroupItem) }
+        // group references (region / airport sub-groups) ride at the list head
+        // as tappable group cards — tapping points THIS group at them. The
+        // auto group reference is skipped: the top 自动 tab IS its switch.
+        val groupItems = remember(allItems) {
+            allItems.filter(::isGroupItem).filterNot { it.tag == ConfigBuilder.AUTO_TAG }
+        }
         // smart mode is only ever visible in the STORED selection (the live
-        // group always names a concrete node) — it wins the highlight race
+        // group always names a concrete node) — it wins the highlight race;
+        // on the smart tab highlight the node the engine currently rides.
+        // Selection precedence: LIVE core state first (fresh truth), then the
+        // stored pick (instant feedback while the stopped core just baked it
+        // into the config), then the config's baked default. Static-first
+        // would shadow every runtime switch with a stale baked default.
+        val runtimeSelected: String? =
+            (liveSelectedByTag[currentTab?.tag] ?: currentTab?.selected)?.takeIf { it.isNotBlank() }
+        val mainRuntimeSelected: String? = when {
+            mainGroup == null -> null
+            else -> liveSelectedByTag[mainGroup.tag]
+                ?: storedSelected?.takeIf { it.isNotBlank() && it != ConfigBuilder.SMART_TAG }
+                ?: mainGroup.selected
+        }?.takeIf { it.isNotBlank() }
         val selectedTag = when {
+            isSmartTab -> smartState.currentTag ?: ""
+            !isMainTab -> runtimeSelected ?: ""
             storedSelected == ConfigBuilder.SMART_TAG -> ConfigBuilder.SMART_TAG
-            else -> mainGroup?.selected?.takeIf { it.isNotBlank() }
-                ?: storedSelected.takeIf { it.isNotBlank() }
-                ?: ConfigBuilder.AUTO_TAG
+            else -> {
+                val sel = mainRuntimeSelected
+                // 选中项本身是个分组(auto / 机场 ♻️)时,高亮穿透到该分组
+                // 当前指向的节点 —— 点自动后主列表能看到实际出口
+                val through = if (sel != null && groups.any { it.tag == sel }) {
+                    liveSelectedByTag[sel] ?: groups.find { it.tag == sel }?.selected
+                } else {
+                    sel
+                }
+                through
+                    ?: storedSelected.takeIf { it.isNotBlank() }
+                    ?: ConfigBuilder.AUTO_TAG
+            }
         }
 
         if (nodeItems.isEmpty()) {
@@ -197,15 +266,6 @@ fun NodesPage(viewModel: AppViewModel) {
                 },
             )
             return@Column
-        }
-
-        if (mixEnabled) {
-            Text(
-                "共 ${nodeItems.size} 个节点 · 来自 ${sourceByTag.values.distinct().size} 个订阅",
-                color = colors.textTertiary,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(bottom = 10.dp),
-            )
         }
 
         Row(
@@ -231,6 +291,52 @@ fun NodesPage(viewModel: AppViewModel) {
                 onChange = { viewModel.setSplitRulesEnabled(it) },
             )
         }
+
+        // ── 分组 tab: 虚拟 自动/智能 置前(仅程序生成配置),后跟真实分组 ──
+        val tabs = buildList {
+            if (virtualTabs) {
+                add(GroupTab(ConfigBuilder.AUTO_TAG, auto = true))
+                add(GroupTab(ConfigBuilder.SMART_TAG, auto = false))
+            }
+            groups.filterNot { virtualTabs && it.tag == ConfigBuilder.AUTO_TAG }.forEach {
+                add(GroupTab(it.tag, auto = it.type.equals("urltest", ignoreCase = true)))
+            }
+        }
+        if (tabs.size > 1) {
+            GroupTabRow(
+                tabs = tabs,
+                selectedTag = activeTab ?: mainGroup?.tag,
+                onSelect = { tag ->
+                    when {
+                        tag == ConfigBuilder.SMART_TAG -> {
+                            activeTab = ConfigBuilder.SMART_TAG
+                            // tapping the smart tab engages the engine (a node
+                            // pick inside exits it, mirroring the old card)
+                            viewModel.selectSmartMode()
+                        }
+
+                        else -> {
+                            activeTab = if (tag == mainGroup?.tag) null else tag
+                            // tapping a urltest group tab (自动 / airport ♻️)
+                            // that the main selector carries = switch onto it
+                            val tapped = groups.find { it.tag == tag }
+                            val main = mainGroup
+                            if (tapped != null && main != null &&
+                                tapped.type.equals("urltest", ignoreCase = true) &&
+                                main.items.any { it.tag == tag } &&
+                                main.selected != tag
+                            ) {
+                                viewModel.selectNode(main.tag, tag)
+                            }
+                        }
+                    }
+                },
+                modifier = Modifier.padding(bottom = 10.dp),
+            )
+        }
+
+        // 状态不设横幅:插入/移除文字行会把列表挤跑。当前自动/智能/组
+        // 选择一律用高亮表达 —— 选中 tab、当前节点卡片、主 tab 组引用卡片。
 
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -265,7 +371,7 @@ fun NodesPage(viewModel: AppViewModel) {
                 modifier = Modifier
                     .clip(RoundedCornerShape(12.dp))
                     .background(colors.primaryMuted)
-                    .pressableClick { viewModel.urlTest(ConfigBuilder.GROUP_TAG) }
+                    .pressableClick { viewModel.urlTest(currentTab?.tag ?: ConfigBuilder.GROUP_TAG) }
                     .padding(horizontal = 16.dp, vertical = 10.dp),
             ) {
                 if (testActive) {
@@ -389,44 +495,15 @@ fun NodesPage(viewModel: AppViewModel) {
                 }
             }
         }
-        val autoNow = if (selectedTag == ConfigBuilder.AUTO_TAG) {
-            autoNowTag(groups, delays)
-        } else {
-            null
-        }
-        val autoCard = NodeEntry(
-            tag = ConfigBuilder.AUTO_TAG,
-            type = "urltest",
-            delay = autoDelay(groups, delays),
-            title = "自动",
-            // auto mode active → show the node the urltest group is on right now
-            source = autoNow,
-        )
-        // smart mode: live status card — shows the node the engine rides on
-        val smartState by viewModel.smartState.collectAsState()
-        val smartOn = selectedTag == ConfigBuilder.SMART_TAG
-        val smartNode = smartState.currentTag
-            ?: (if (smartOn) Settings.smartActiveTag.takeIf { it.isNotBlank() } else null)
-        val smartCard = NodeEntry(
-            tag = ConfigBuilder.SMART_TAG,
-            type = "smart",
-            delay = smartState.currentDelayMs,
-            testedAt = if (smartState.currentDelayMs > 0) System.currentTimeMillis() / 1000 else 0,
-            title = "智能",
-            source = when {
-                !smartOn -> "点按开启"
-                smartNode != null -> smartNode
-                smartState.active -> smartState.phase
-                else -> "连接后自动择优"
-            },
-        )
-        val displayed = listOf(autoCard, smartCard) + sorted
+        // 组引用卡片置顶,后跟按序节点
+        val displayed = groupItems + sorted
         val nodeCtx = androidx.compose.ui.platform.LocalContext.current
         val onNodeTap: (NodeEntry) -> Unit = { item ->
-            if (item.tag == ConfigBuilder.SMART_TAG) {
-                viewModel.selectSmartMode()
-            } else {
-                viewModel.selectNode(ConfigBuilder.GROUP_TAG, item.tag)
+            when {
+                item.tag == ConfigBuilder.SMART_TAG -> viewModel.selectSmartMode()
+                // urltest groups pick their own node — selection taps are no-ops
+                !tabSelectable && !isMainTab -> Unit
+                else -> viewModel.selectNode(currentTab?.tag ?: ConfigBuilder.GROUP_TAG, item.tag)
             }
         }
 
@@ -454,7 +531,7 @@ fun NodesPage(viewModel: AppViewModel) {
                             delay = delays[item.tag] ?: item.delay,
                             selected = item.tag == selectedTag,
                             onClick = { onNodeTap(item) },
-                            onLongPress = { if (item.tag != ConfigBuilder.AUTO_TAG) detailItem = item },
+                            onLongPress = { if (!isGroupItem(item)) detailItem = item },
                         )
                     }
                 }
@@ -477,7 +554,7 @@ fun NodesPage(viewModel: AppViewModel) {
                             delay = delays[item.tag] ?: item.delay,
                             selected = item.tag == selectedTag,
                             onClick = { onNodeTap(item) },
-                            onLongPress = { if (item.tag != ConfigBuilder.AUTO_TAG) detailItem = item },
+                            onLongPress = { if (!isGroupItem(item)) detailItem = item },
                         )
                     }
                 }
@@ -639,34 +716,6 @@ private fun TestSummaryBar(
     }
 }
 
-/**
- * The node the auto (urltest) group is on. Now() is empty until the first
- * full test finishes — mirror the home row and preview the fastest known
- * member (or the first one) instead of sitting blank.
- */
-private fun autoNowTag(
-    groups: List<com.interstellar.proxy.core.CoreGroup>,
-    delays: Map<String, Int>,
-): String? {
-    val auto = groups.find { it.tag == ConfigBuilder.AUTO_TAG } ?: return null
-    val now = auto.selected?.takeIf { it.isNotBlank() && it != ConfigBuilder.AUTO_TAG }
-    if (now != null) return now
-    val items = auto.items
-    if (items.isEmpty()) return null
-    return items.minByOrNull { item ->
-        val d = delays[item.tag]?.takeIf { it > 0 }
-            ?: item.urlTestDelay.takeIf { it > 0 }
-        d ?: Int.MAX_VALUE
-    }?.tag
-}
-
-private fun autoDelay(groups: List<com.interstellar.proxy.core.CoreGroup>, delays: Map<String, Int>): Int {
-    val now = autoNowTag(groups, delays) ?: return 0
-    delays[now]?.takeIf { it > 0 }?.let { return it }
-    delays[ConfigBuilder.AUTO_TAG]?.takeIf { it > 0 }?.let { return it }
-    return 0
-}
-
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun NodeRow(
@@ -714,17 +763,20 @@ private fun NodeRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (item.node != null) {
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        "${item.node.protocolSummary()} · ${item.node.server}:${item.node.port}",
-                        color = colors.textTertiary,
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    when {
+                        isGroupItem(item) && item.type.equals("urltest", true) -> "自动测速分组 ›"
+                        isGroupItem(item) -> "分组 ›"
+                        item.node != null -> "${item.node.protocolSummary()} · ${item.node.server}:${item.node.port}"
+                        else -> ""
+                    },
+                    color = colors.textTertiary,
+                    fontSize = 11.sp,
+                    fontFamily = if (isGroupItem(item)) null else FontFamily.Monospace,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
             item.source?.let { source ->
                 Spacer(Modifier.width(8.dp))
@@ -737,7 +789,11 @@ private fun NodeRow(
                     modifier = Modifier.widthIn(max = 128.dp),
                 )
             }
-            DelayBadge(delay, tested = item.testedAt > 0)
+            if (isGroupItem(item)) {
+                Text("›", color = colors.textTertiary, fontSize = 18.sp)
+            } else {
+                DelayBadge(delay, tested = item.testedAt > 0)
+            }
         }
     }
 }
@@ -797,29 +853,40 @@ private fun NodeGridCell(
                 )
             }
         }
-        // 协议信息独占一行（全宽），延迟徽章另起一行靠右
+        // 协议信息独占一行（全宽），延迟徽章另起一行靠右；分组引用不带延迟
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .fillMaxWidth()
                 .padding(end = 4.dp),
         ) {
-            if (item.node != null) {
-                Text(
-                    item.node.protocolSummary(),
+            when {
+                isGroupItem(item) -> Text(
+                    if (item.type.equals("urltest", true)) "自动测速分组" else "分组",
                     color = colors.textTertiary,
                     fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
                 )
-                Spacer(Modifier.height(5.dp))
+
+                item.node != null -> {
+                    Text(
+                        item.node.protocolSummary(),
+                        color = colors.textTertiary,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(5.dp))
+                }
             }
-            DelayBadge(
-                delay = delay,
-                modifier = Modifier.align(Alignment.End),
-                tested = item.testedAt > 0,
-            )
+            if (!isGroupItem(item)) {
+                DelayBadge(
+                    delay = delay,
+                    modifier = Modifier.align(Alignment.End),
+                    tested = item.testedAt > 0,
+                )
+            }
         }
     }
 }
@@ -1024,5 +1091,58 @@ fun EmptyHint(text: String) {
         contentAlignment = Alignment.TopCenter,
     ) {
         Text(text, color = colors.textTertiary, fontSize = 13.sp)
+    }
+}
+
+/** One tab chip: a real core group, or a virtual 自动/智能 entry. */
+private data class GroupTab(val tag: String, val auto: Boolean)
+
+/** Wrapping group tabs (airport configs carry a dozen+ groups). */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun GroupTabRow(
+    tabs: List<GroupTab>,
+    selectedTag: String?,
+    onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalInterstellarColors.current
+    androidx.compose.foundation.layout.FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        tabs.forEach { tab ->
+            val selected = tab.tag == selectedTag
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(if (selected) colors.primaryMuted else colors.bgDeep)
+                    .border(
+                        1.dp,
+                        if (selected) colors.primaryBorder else colors.border,
+                        RoundedCornerShape(50),
+                    )
+                    .pressableClick { onSelect(tab.tag) }
+                    .padding(horizontal = 14.dp, vertical = 7.dp),
+            ) {
+                Text(
+                    tab.tag,
+                    color = if (selected) colors.primary else colors.textSecondary,
+                    fontSize = 13.sp,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    maxLines = 1,
+                )
+                if (tab.auto) {
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        "⚡",
+                        color = if (selected) colors.primary else colors.textTertiary,
+                        fontSize = 11.sp,
+                    )
+                }
+            }
+        }
     }
 }

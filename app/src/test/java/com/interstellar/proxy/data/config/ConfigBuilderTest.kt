@@ -59,7 +59,7 @@ class ConfigBuilderTest {
     fun `proxied modes detour remote dns through the selector group`() {
         val remote = dnsServers(ConfigBuilder.OutboundMode.RULE)
             .first { it["tag"]!!.jsonPrimitive.content == "dns-remote" }
-        check(remote["detour"]!!.jsonPrimitive.content == "proxy") { "dns-remote detour" }
+        check(remote["detour"]!!.jsonPrimitive.content == "手动选择") { "dns-remote detour" }
     }
 
     @Test
@@ -89,7 +89,7 @@ class ConfigBuilderTest {
                     ConfigBuilder.BuildOptions(mode = mode, adBlock = false, bypassCn = false),
                 ),
             ).jsonObject
-            check(json["route"]!!.jsonObject["final"]!!.jsonPrimitive.content == "proxy") {
+            check(json["route"]!!.jsonObject["final"]!!.jsonPrimitive.content == "手动选择") {
                 "$mode must keep the proxy group as route.final"
             }
         }

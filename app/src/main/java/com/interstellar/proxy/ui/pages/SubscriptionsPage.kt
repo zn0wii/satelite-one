@@ -72,6 +72,7 @@ fun SubscriptionsPage(viewModel: AppViewModel) {
     val activeId by viewModel.activeSubscriptionId.collectAsState()
     val mixEnabled by viewModel.mixEnabled.collectAsState()
     val mixIds by viewModel.mixSubscriptionIds.collectAsState()
+    val useRawConfig by viewModel.useRawConfig.collectAsState()
     var showAdd by remember { mutableStateOf(false) }
     var editTarget by remember { mutableStateOf<SubscriptionRepository.Subscription?>(null) }
     var deleteTarget by remember { mutableStateOf<SubscriptionRepository.Subscription?>(null) }
@@ -107,16 +108,34 @@ fun SubscriptionsPage(viewModel: AppViewModel) {
                 },
             )
 
+            IosSectionLabel("配置模式")
+            IosCard(modifier = Modifier.fillMaxWidth()) {
+                IosToggleRow(
+                    title = "使用原始配置",
+                    subtitle = when {
+                        useRawConfig -> "激活订阅的原始配置直通内核(不重写),自动注入内置规则"
+                        else -> "订阅是完整配置且与内核匹配时,原文直供内核"
+                    },
+                    checked = useRawConfig,
+                    onChange = { viewModel.setUseRawConfig(it) },
+                )
+            }
+            IosSectionFooter(
+                "开启后保留订阅原有的分组与规则结构,仅注入绕过大陆等内置规则;不支持合并订阅与自定义规则。内核不匹配时自动回退重写模式。",
+            )
+
+            Spacer(Modifier.height(8.dp))
             IosSectionLabel("合并订阅 (Mix)")
             IosCard(modifier = Modifier.fillMaxWidth()) {
                 IosToggleRow(
                     title = "合并多个订阅",
-                    subtitle = if (mixEnabled) {
-                        "已勾选 ${mixIds.size} / ${subscriptions.size} 个订阅"
-                    } else {
-                        null
+                    subtitle = when {
+                        useRawConfig -> "原始配置模式下不可用"
+                        mixEnabled -> "已勾选 ${mixIds.size} / ${subscriptions.size} 个订阅"
+                        else -> null
                     },
                     checked = mixEnabled,
+                    enabled = !useRawConfig,
                     onChange = { viewModel.setMixEnabled(it) },
                 )
             }
@@ -161,10 +180,16 @@ fun SubscriptionsPage(viewModel: AppViewModel) {
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     subscriptions.forEach { sub ->
-                        IosCard(modifier = Modifier.fillMaxWidth()) {
+                        val isActive = !mixEnabled && sub.id == activeId
+                        IosCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            // the in-use card gets a clearly visible accent ring
+                            // (primaryBorder is a 30%-alpha hairline — too faint here)
+                            border = if (isActive) colors.primary.copy(alpha = 0.6f) else null,
+                        ) {
                             SubscriptionCard(
                                 sub = sub,
-                                active = !mixEnabled && sub.id == activeId,
+                                active = isActive,
                                 checked = if (mixEnabled) sub.id in mixIds else null,
                                 onClick = {
                                     if (mixEnabled) {
@@ -328,6 +353,29 @@ private fun SubscriptionCard(
                 modifier = Modifier.weight(1f),
             )
             Text("${sub.nodes.size} 个节点", color = colors.textSecondary, fontSize = 13.sp)
+            val format = com.interstellar.proxy.data.subscription.RawConfigFormat.from(sub.configFormat)
+            if (format != null) {
+                Spacer(Modifier.width(8.dp))
+                // raw only takes effect when the format matches the running
+                // core and the retained body is still on disk — show the truth
+                val rawOn = Settings.useRawConfigEnabled
+                val coreKind = Settings.coreKind
+                val matchesCore = when (format) {
+                    com.interstellar.proxy.data.subscription.RawConfigFormat.CLASH ->
+                        coreKind == com.interstellar.proxy.core.CoreKind.MIHOMO
+                    com.interstellar.proxy.data.subscription.RawConfigFormat.SINGBOX ->
+                        coreKind == com.interstellar.proxy.core.CoreKind.SINGBOX
+                    com.interstellar.proxy.data.subscription.RawConfigFormat.XRAY ->
+                        coreKind == com.interstellar.proxy.core.CoreKind.XRAY
+                }
+                val effective = rawOn && matchesCore &&
+                    SubscriptionRepository.rawFileOf(sub.id).isFile
+                FormatBadge(
+                    label = format.label,
+                    active = rawOn,
+                    activeHint = if (effective) "原始" else "已回退重写",
+                )
+            }
         }
         if (sub.totalBytes > 0 && expireText != null) {
             Spacer(Modifier.height(4.dp))
@@ -432,6 +480,34 @@ fun ActionChip(text: String, primary: Boolean = false, danger: Boolean = false, 
             .padding(horizontal = 12.dp, vertical = 6.dp),
     ) {
         Text(text, color = fg, fontSize = 12.sp)
+    }
+}
+
+/** Small pill identifying the retained raw-config format; glows when raw mode is on. */
+@Composable
+private fun FormatBadge(label: String, active: Boolean, activeHint: String) {
+    val colors = LocalInterstellarColors.current
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(if (active) colors.primaryMuted else colors.bgDeep)
+            .border(
+                1.dp,
+                if (active) colors.primaryBorder else colors.border,
+                RoundedCornerShape(50),
+            )
+            .padding(horizontal = 8.dp, vertical = 2.dp),
+    ) {
+        Text(
+            label,
+            color = if (active) colors.primary else colors.textTertiary,
+            fontSize = 10.sp,
+        )
+        if (active) {
+            Spacer(Modifier.width(4.dp))
+            Text(activeHint, color = colors.primary, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+        }
     }
 }
 

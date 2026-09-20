@@ -24,7 +24,7 @@ import kotlinx.serialization.json.putJsonObject
  */
 object ConfigBuilder {
 
-    const val GROUP_TAG = "proxy"
+    const val GROUP_TAG = "手动选择"
     const val AUTO_TAG = "auto"
     /** Placeholder for the upcoming smart-switch mode (not yet functional). */
     const val SMART_TAG = "smart"
@@ -48,7 +48,8 @@ object ConfigBuilder {
         val selectedNodeTag: String? = null,
         val mixedPortEnabled: Boolean = true,
         val mixedPort: Int = 2080,
-        val apiPort: Int = 9090,
+        // keep in sync with MihomoCore.API_PORT (19090 — never clash's 9090 default)
+        val apiPort: Int = 19090,
         val apiSecret: String = "",
         val customRules: List<CustomRouteRule> = emptyList(),
         /** User domain→IP injections, resolved by a hosts DNS server first. */
@@ -739,11 +740,13 @@ object ConfigBuilder {
 
     /**
      * Built-in rule set: local file when available (bundled in APK),
-     * remote download as fallback.
+     * remote download as fallback. Also used by RawConfigApplier.
      */
-    private fun ruleSetJson(tag: String, asset: com.interstellar.proxy.data.RulesStore.RuleAsset): JsonObject {
-        val file = com.interstellar.proxy.data.RulesStore.fileOf(asset)
-        return if (file.isFile && file.length() > 8) {
+    internal fun ruleSetJson(tag: String, asset: com.interstellar.proxy.data.RulesStore.RuleAsset): JsonObject {
+        // runCatching: fall to the remote branch when the app context is
+        // unavailable (JVM unit tests) instead of crashing config generation
+        val file = runCatching { com.interstellar.proxy.data.RulesStore.fileOf(asset) }.getOrNull()
+        return if (file != null && file.isFile && file.length() > 8) {
             buildJsonObject {
                 put("tag", tag)
                 put("type", "local")

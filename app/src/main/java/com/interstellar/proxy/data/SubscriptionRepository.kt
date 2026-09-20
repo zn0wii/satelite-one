@@ -35,6 +35,8 @@ object SubscriptionRepository {
         val totalBytes: Long = 0,
         val expireSeconds: Long = 0,
         val lastUpdated: Long = 0,
+        /** Detected format of the retained raw body ("clash"/"singbox"/"xray"; null = plain node list). */
+        val configFormat: String? = null,
     )
 
     private val dir: File
@@ -42,6 +44,24 @@ object SubscriptionRepository {
 
     private val indexFile: File
         get() = File(InterstellarApplication.application.filesDir, "subscriptions.json")
+
+    /** Retained raw subscription body on disk (kept when it is a full core config). */
+    fun rawFileOf(subscriptionId: String): File = File(dir, "$subscriptionId.raw")
+
+    /**
+     * Persists the raw body and returns its detected format (null = plain
+     * node list, raw file removed). Airport configs use YAML anchors and
+     * provider-specific quirks, so the file is stored byte-for-byte (no
+     * re-serialization) and only fed to the matching core.
+     */
+    fun saveRawBody(subscriptionId: String, body: String): String? {
+        val format = com.interstellar.proxy.data.subscription.RawConfigDetector.detect(body) ?: run {
+            rawFileOf(subscriptionId).delete()
+            return null
+        }
+        runCatching { rawFileOf(subscriptionId).writeText(body) }
+        return format.wire
+    }
 
     var subscriptions: MutableList<Subscription> = load()
         private set
@@ -100,6 +120,7 @@ object SubscriptionRepository {
     @Synchronized
     fun remove(id: String) {
         subscriptions.removeAll { it.id == id }
+        rawFileOf(id).delete()
         if (activeSubscriptionId == id) {
             activeSubscriptionId = subscriptions.firstOrNull()?.id ?: ""
         }
@@ -157,6 +178,16 @@ object SubscriptionRepository {
         // built-in rule sets must exist on disk before local rule-set paths
         // are embedded into the config
         RulesStore.ensureRules(InterstellarApplication.application)
+
+        // raw-config path: the active subscription IS a full config for the
+        // running core — feed it through with compatibility shims + built-in
+        // rule injection instead of rewriting. Mix and custom rules do not
+        // apply here; format mismatch / missing file falls through to rewrite.
+        val activeSub = activeSubscription()
+        if (Settings.useRawConfigEnabled && activeSub != null) {
+            val rawApplied = applyRawConfigIfMatching(activeSub)
+            if (rawApplied != null) return rawApplied
+        }
 
         val mix = Settings.mixEnabled
         if (!mix && activeSubscription() == null) {
@@ -236,6 +267,54 @@ object SubscriptionRepository {
         regenerateActiveConfig()
     }
 
+    /** Raw path of [regenerateActiveConfig]; null = not applicable, use the rewrite. */
+    private fun applyRawConfigIfMatching(sub: Subscription): String? {
+        val format = com.interstellar.proxy.data.subscription.RawConfigFormat.from(sub.configFormat)
+        val coreKind = Settings.coreKind
+        val matches = when (format) {
+            com.interstellar.proxy.data.subscription.RawConfigFormat.CLASH ->
+                coreKind == com.interstellar.proxy.core.CoreKind.MIHOMO
+            com.interstellar.proxy.data.subscription.RawConfigFormat.SINGBOX ->
+                coreKind == com.interstellar.proxy.core.CoreKind.SINGBOX
+            com.interstellar.proxy.data.subscription.RawConfigFormat.XRAY ->
+                coreKind == com.interstellar.proxy.core.CoreKind.XRAY
+            null -> false
+        }
+        if (!matches) return null
+        val raw = runCatching { rawFileOf(sub.id).takeIf { it.isFile }?.readText() }.getOrNull() ?: return null
+        val options = com.interstellar.proxy.data.config.RawConfigApplier.Options(
+            mode = Settings.outboundMode,
+            bypassLan = Settings.bypassLanEnabled,
+            bypassCn = Settings.bypassCnEnabled,
+            overseasProxy = Settings.overseasProxyEnabled,
+            fallbackDirect = Settings.fallbackDirectEnabled,
+            adBlock = Settings.adBlockEnabled,
+            apiSecret = Settings.apiSecret,
+        )
+        val content = when (format) {
+            com.interstellar.proxy.data.subscription.RawConfigFormat.CLASH ->
+                com.interstellar.proxy.data.config.RawConfigApplier.applyClash(raw, options)
+            com.interstellar.proxy.data.subscription.RawConfigFormat.SINGBOX ->
+                com.interstellar.proxy.data.config.RawConfigApplier.applySingbox(raw, options)
+            com.interstellar.proxy.data.subscription.RawConfigFormat.XRAY ->
+                com.interstellar.proxy.data.config.RawConfigApplier.applyXray(raw, options)
+            null -> return null
+        }
+        return try {
+            // libbox only validates sing-box JSON; sidecars self-validate at spawn
+            if (coreKind == com.interstellar.proxy.core.CoreKind.SINGBOX) {
+                Libbox.checkConfig(content)
+            }
+            ConfigStore.writeActiveConfig(content)
+            lastConfigError = null
+            content
+        } catch (e: Exception) {
+            lastConfigError = "原始配置校验失败:${e.message}"
+            android.util.Log.e(TAG, "raw config check failed: ${e.message}\n$content", e)
+            null
+        }
+    }
+
     /**
      * Fetches a URL subscription and updates the store.
      * Returns a user-facing message, or null when the sub is not refreshable.
@@ -245,11 +324,13 @@ object SubscriptionRepository {
         val url = sub.url ?: return@withContext "本地订阅不支持刷新"
         try {
             val result = com.interstellar.proxy.data.net.SubscriptionFetcher.fetch(url)
+            val format = saveRawBody(id, result.body)
             when (val parsed = com.interstellar.proxy.data.subscription.SubscriptionParser.parse(result.body, id)) {
                 is com.interstellar.proxy.data.subscription.SubscriptionParser.Result.Nodes -> {
                     upsert(
                         sub.copy(
                             nodes = parsed.nodes,
+                            configFormat = format,
                             uploadBytes = result.uploadBytes,
                             downloadBytes = result.downloadBytes,
                             totalBytes = result.totalBytes,
@@ -261,7 +342,14 @@ object SubscriptionRepository {
                 }
 
                 com.interstellar.proxy.data.subscription.SubscriptionParser.Result.Empty ->
-                    "刷新后内容无法解析:${sub.name}"
+                    // e.g. a full Xray config: no nodes to extract, but the raw
+                    // body is retained and usable in raw mode with a matching core
+                    if (format != null) {
+                        upsert(sub.copy(configFormat = format, lastUpdated = System.currentTimeMillis()))
+                        "已刷新 ${sub.name}:${com.interstellar.proxy.data.subscription.RawConfigFormat.from(format)?.label} 配置已保留"
+                    } else {
+                        "刷新后内容无法解析:${sub.name}"
+                    }
             }
         } catch (e: Exception) {
             "刷新失败 ${sub.name}:${e.message}"

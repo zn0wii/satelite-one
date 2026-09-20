@@ -56,7 +56,7 @@ class MihomoConfigBuilderTest {
         val dns = doc["dns"]!!.jsonObject
         check("proxy-server-nameserver" in dns) { "node-server direct dns missing" }
         check(doc["mixed-port"]!!.jsonPrimitive.content == "2080") { "mixed-port" }
-        check(doc["external-controller"]!!.jsonPrimitive.content == "127.0.0.1:9090") { "clash api" }
+        check(doc["external-controller"]!!.jsonPrimitive.content == "127.0.0.1:19090") { "clash api" }
         check("tun" !in doc) { "tun must be absent (sidecar proxy-only + hev bridge)" }
 
         val proxies = doc["proxies"]!!.jsonArray
@@ -75,13 +75,13 @@ class MihomoConfigBuilderTest {
         check(hy2["obfs-password"]!!.jsonPrimitive.content == "obfs") { "hy2 obfs" }
 
         val groups = doc["proxy-groups"]!!.jsonArray.map { it.jsonObject }
-        check(groups.first()["name"]!!.jsonPrimitive.content == "proxy") { "main select" }
+        check(groups.first()["name"]!!.jsonPrimitive.content == "手动选择") { "main select" }
         check(groups.any { it["name"]!!.jsonPrimitive.content == "auto" }) { "urltest group" }
         val mainMembers = groups.first()["proxies"]!!.jsonArray.map { it.jsonPrimitive.content }
         check(mainMembers.first() == "auto" && mainMembers.size == 4) { "selector members: $mainMembers" }
 
         val rules = doc["rules"]!!.jsonArray.map { it.jsonPrimitive.content }
-        check(rules.last() == "MATCH,proxy") { "final rule: ${rules.last()}" }
+        check(rules.last() == "MATCH,手动选择") { "final rule: ${rules.last()}" }
         check("GEOSITE,cn,DIRECT" in rules) { "cn bypass" }
         check(rules.any { it.startsWith("IP-CIDR,192.168.0.0/16,DIRECT") }) { "lan bypass" }
     }
@@ -103,7 +103,7 @@ class MihomoConfigBuilderTest {
         val cn = rules.indexOfFirst { it == "GEOSITE,cn,DIRECT" }
         check(overseas >= 0) { "geolocation-!cn rule missing" }
         check(cn < 0 || overseas < cn) { "overseas rule must match before the CN bypass" }
-        check(rules[overseas] == "GEOSITE,geolocation-!cn,proxy") { rules[overseas] }
+        check(rules[overseas] == "GEOSITE,geolocation-!cn,手动选择") { rules[overseas] }
     }
 
     @Test
@@ -111,6 +111,6 @@ class MihomoConfigBuilderTest {
         val rule = rulesOf(options.copy(fallbackDirect = true))
         check(rule.last() == "MATCH,DIRECT") { "final rule: ${rule.last()}" }
         val global = rulesOf(options.copy(mode = ConfigBuilder.OutboundMode.GLOBAL, fallbackDirect = true))
-        check(global.last() == "MATCH,proxy") { "global ignores the fallback: ${global.last()}" }
+        check(global.last() == "MATCH,手动选择") { "global ignores the fallback: ${global.last()}" }
     }
 }

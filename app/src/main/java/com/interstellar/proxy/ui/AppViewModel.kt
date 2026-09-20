@@ -42,6 +42,9 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import com.interstellar.proxy.data.subscription.arr
+import com.interstellar.proxy.data.subscription.str
+import com.interstellar.proxy.data.subscription.strList
 import java.security.SecureRandom
 
 data class SpeedState(
@@ -109,6 +112,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _groups = MutableStateFlow<List<CoreGroup>>(emptyList())
     val groups: StateFlow<List<CoreGroup>> = _groups
+
+    /**
+     * Groups parsed from the on-disk active config — what the page shows while
+     * the core is stopped (live groups only exist once it runs).
+     */
+    private val _staticGroups = MutableStateFlow<List<CoreGroup>>(emptyList())
+    val staticGroups: StateFlow<List<CoreGroup>> = _staticGroups
 
     /** Observable engine kind — drives the dashboard core segmented control. */
     private val _coreKind = MutableStateFlow(Settings.coreKind)
@@ -229,6 +239,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     /** Mix: node pool = union of the checked subscriptions. */
     private val _mixEnabled = MutableStateFlow(Settings.mixEnabled)
     val mixEnabled: StateFlow<Boolean> = _mixEnabled
+
+    /** Global raw-config switch: the active subscription's config goes to the core verbatim. */
+    private val _useRawConfig = MutableStateFlow(Settings.useRawConfigEnabled)
+    val useRawConfig: StateFlow<Boolean> = _useRawConfig
+
+    fun setUseRawConfig(enabled: Boolean) {
+        if (enabled == _useRawConfig.value) return
+        _useRawConfig.value = enabled
+        Settings.useRawConfigEnabled = enabled
+        // raw mode is single-subscription by definition — mix cannot coexist
+        if (enabled && Settings.mixEnabled) {
+            Settings.mixEnabled = false
+            _mixEnabled.value = false
+        }
+        refreshProxyConfig()
+    }
 
     private val _mixSubscriptionIds = MutableStateFlow(Settings.mixSubscriptionIds)
     val mixSubscriptionIds: StateFlow<Set<String>> = _mixSubscriptionIds
@@ -583,7 +609,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun pollMihomoOnce() {
-        if (clashApi.version() == null) return
+        if (clashApi.version() == null) {
+            // core unreachable (dead or mid-respawn): drop the dead snapshot
+            // so the nodes page falls back to groups parsed from the on-disk
+            // config instead of showing the old core's last state forever
+            if (_groups.value.isNotEmpty()) _groups.value = emptyList()
+            return
+        }
         if (probing) return
         if (_status.value == Status.Starting) markStarted()
 
@@ -638,6 +670,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         ensureApiSecret()
+        // the nodes page shows these until the core runs and live groups arrive
+        refreshStaticGroups()
     }
 
     fun connect() {
@@ -824,6 +858,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 _message.value = SubscriptionRepository.lastConfigError ?: "配置更新失败"
                 return@launch
             }
+            _staticGroups.value = parseStaticGroups(config, Settings.coreKind)
+            // a switch during Starting would otherwise be silently dropped: the
+            // in-flight start already consumed the previous config and no
+            // reload fires — wait for the start to settle, then apply
+            if (_status.value == Status.Starting) {
+                var waited = 0
+                while (_status.value == Status.Starting && waited < 20_000) {
+                    delay(200)
+                    waited += 200
+                }
+            }
             if (_status.value == Status.Started) {
                 when (Settings.coreKind) {
                     CoreKind.MIHOMO -> runCatching {
@@ -837,6 +882,76 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     CoreKind.SINGBOX -> runCatching { CommandTarget.standaloneClient().serviceReload() }
                 }
             }
+        }
+    }
+
+    /** Re-reads whatever config is on disk (startup / core switch). */
+    fun refreshStaticGroups() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val content = com.interstellar.proxy.data.ConfigStore.readActiveConfig()
+            _staticGroups.value =
+                content?.let { parseStaticGroups(it, Settings.coreKind) } ?: emptyList()
+        }
+    }
+
+    /**
+     * Groups out of a generated/raw config: mihomo proxy-groups or sing-box
+     * selector/urltest outbounds. Xray has no group concept — callers fall
+     * back to the stored node pool.
+     */
+    private fun parseStaticGroups(content: String, coreKind: CoreKind): List<CoreGroup> =
+        runCatching {
+            when (coreKind) {
+                CoreKind.MIHOMO -> parseClashGroups(content)
+                CoreKind.SINGBOX -> parseSingboxGroups(content)
+                CoreKind.XRAY -> emptyList()
+            }
+        }.getOrDefault(emptyList())
+
+    private fun parseClashGroups(yaml: String): List<CoreGroup> {
+        val json = com.interstellar.proxy.data.subscription.YamlToJson.convert(yaml) ?: return emptyList()
+        val groups = json.arr("proxy-groups") ?: return emptyList()
+        // members that reference another group get that group's type, so the
+        // nodes page can render them as group cards while the core is stopped
+        val typeByName = groups.mapNotNull { el ->
+            (el as? kotlinx.serialization.json.JsonObject)?.let { g ->
+                g.str("name")?.let { it to (g.str("type") ?: "select").lowercase() }
+            }
+        }.toMap()
+        return groups.mapNotNull { el ->
+            val g = el as? kotlinx.serialization.json.JsonObject ?: return@mapNotNull null
+            val name = g.str("name") ?: return@mapNotNull null
+            CoreGroup(
+                tag = name,
+                type = (g.str("type") ?: "select").lowercase(),
+                // runtime state unknown while stopped — highlight nothing
+                selected = null,
+                items = (g.strList("proxies") ?: emptyList()).map {
+                    CoreGroupItem(it, typeByName[it] ?: "")
+                },
+            )
+        }
+    }
+
+    private fun parseSingboxGroups(content: String): List<CoreGroup> {
+        val root = kotlinx.serialization.json.Json.parseToJsonElement(content)
+            .let { it as? kotlinx.serialization.json.JsonObject } ?: return emptyList()
+        val outbounds = (root["outbounds"] as? kotlinx.serialization.json.JsonArray)
+            ?.filterIsInstance<kotlinx.serialization.json.JsonObject>() ?: return emptyList()
+        val typeOf = outbounds.associateBy { it.str("tag") }
+        return outbounds.mapNotNull { ob ->
+            val type = ob.str("type")?.lowercase() ?: return@mapNotNull null
+            if (type != "selector" && type != "urltest") return@mapNotNull null
+            val tag = ob.str("tag") ?: return@mapNotNull null
+            val members = (ob["outbounds"] as? kotlinx.serialization.json.JsonArray)
+                ?.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
+                ?: emptyList()
+            CoreGroup(
+                tag = tag,
+                type = type,
+                selected = ob.str("default")?.takeIf { it in members },
+                items = members.map { CoreGroupItem(it, typeOf[it]?.str("type") ?: "") },
+            )
         }
     }
 
@@ -880,7 +995,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
      * can't morph into another), regenerate the config for the new core and
      * start it again.
      */
-    fun switchCore(kind: CoreKind) {        if (Settings.coreKind == kind) return
+    fun switchCore(kind: CoreKind) {
+        if (Settings.coreKind == kind) return
         viewModelScope.launch(Dispatchers.IO) {
             val wasRunning = _status.value == Status.Started || _status.value == Status.Starting
             if (wasRunning) {
@@ -904,6 +1020,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 _message.value = SubscriptionRepository.lastConfigError ?: "配置更新失败"
                 return@launch
             }
+            _staticGroups.value = parseStaticGroups(config, kind)
             if (wasRunning) {
                 com.interstellar.proxy.bg.BoxService.start()
                 if (Settings.selectedOutboundTag == com.interstellar.proxy.data.config.ConfigBuilder.SMART_TAG) {
@@ -972,7 +1089,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             } else {
-                SubscriptionRepository.regenerateActiveConfig()
+                // stopped: bake the pick into the regenerated config and
+                // refresh the static groups so the page reflects it at once
+                val config = SubscriptionRepository.regenerateActiveConfig()
+                if (config != null) {
+                    _staticGroups.value = parseStaticGroups(config, Settings.coreKind)
+                }
                 _selectedOutboundTag.value = Settings.selectedOutboundTag
             }
         }
@@ -1369,6 +1491,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         // stamp the subscription id on nodes up front so mix source labels work
         val subId = SubscriptionRepository.newSubscriptionId()
+        val format = SubscriptionRepository.saveRawBody(subId, body)
         when (val parsed = SubscriptionParser.parse(body, subId)) {
             is SubscriptionParser.Result.Nodes -> {
                 val sub = SubscriptionRepository.Subscription(
@@ -1381,6 +1504,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     totalBytes = traffic?.totalBytes ?: 0,
                     expireSeconds = traffic?.expireSeconds ?: 0,
                     lastUpdated = System.currentTimeMillis(),
+                    configFormat = format,
                 )
                 SubscriptionRepository.upsert(sub)
                 if (Settings.selectedOutboundTag.isBlank()) {
@@ -1393,8 +1517,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             SubscriptionParser.Result.Empty -> {
-                _message.value = "无法识别的订阅内容"
-                _addSubError.value = "无法识别的订阅内容"
+                // full Xray configs carry no extractable nodes but are valid raw
+                // bodies — import them as raw-only subscriptions
+                if (format != null) {
+                    SubscriptionRepository.upsert(
+                        SubscriptionRepository.Subscription(
+                            id = subId,
+                            name = name,
+                            url = url,
+                            lastUpdated = System.currentTimeMillis(),
+                            configFormat = format,
+                        ),
+                    )
+                    _message.value = "已导入 $name(${com.interstellar.proxy.data.subscription.RawConfigFormat.from(format)?.label} 配置)"
+                } else {
+                    SubscriptionRepository.rawFileOf(subId).delete()
+                    _message.value = "无法识别的订阅内容"
+                    _addSubError.value = "无法识别的订阅内容"
+                }
             }
         }
         _subscriptions.value = SubscriptionRepository.subscriptions.toList()
@@ -1413,11 +1553,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             _busy.value = true
             try {
                 val result = SubscriptionFetcher.fetch(url)
+                val format = SubscriptionRepository.saveRawBody(id, result.body)
                 when (val parsed = SubscriptionParser.parse(result.body, id)) {
                     is SubscriptionParser.Result.Nodes -> {
                         SubscriptionRepository.upsert(
                             sub.copy(
                                 nodes = parsed.nodes,
+                                configFormat = format,
                                 uploadBytes = result.uploadBytes,
                                 downloadBytes = result.downloadBytes,
                                 totalBytes = result.totalBytes,
@@ -1429,13 +1571,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     }
 
                     SubscriptionParser.Result.Empty ->
-                        showToast("「${sub.name}」刷新后内容无法解析", UiToast.Kind.Error)
+                        if (format != null) {
+                            SubscriptionRepository.upsert(
+                                sub.copy(configFormat = format, lastUpdated = System.currentTimeMillis()),
+                            )
+                            showToast("「${sub.name}」配置已保留", UiToast.Kind.Success)
+                        } else {
+                            showToast("「${sub.name}」刷新后内容无法解析", UiToast.Kind.Error)
+                        }
                 }
             } catch (e: Exception) {
                 showToast("「${sub.name}」刷新失败: ${e.message}", UiToast.Kind.Error)
             } finally {
                 _busy.value = false
                 _refreshing.value = false
+                // upsert regenerated the active config behind refreshProxyConfig's back
+                refreshStaticGroups()
                 _subscriptions.value = SubscriptionRepository.subscriptions.toList()
                 _activeSubscriptionId.value = SubscriptionRepository.activeSubscriptionId
             }
@@ -1492,6 +1643,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             } finally {
                 _busy.value = false
                 _refreshing.value = false
+                // upserts regenerated the active config behind refreshProxyConfig's back
+                refreshStaticGroups()
                 _subscriptions.value = SubscriptionRepository.subscriptions.toList()
                 _activeSubscriptionId.value = SubscriptionRepository.activeSubscriptionId
             }
@@ -1515,6 +1668,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun removeSubscription(id: String) {
         SubscriptionRepository.remove(id)
+        refreshStaticGroups()
         _subscriptions.value = SubscriptionRepository.subscriptions.toList()
         _activeSubscriptionId.value = SubscriptionRepository.activeSubscriptionId
         _mixSubscriptionIds.value = Settings.mixSubscriptionIds
@@ -1525,12 +1679,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         SubscriptionRepository.activeSubscriptionId = id
         _activeSubscriptionId.value = id
         refreshSplitRuleStatus()
-        viewModelScope.launch(Dispatchers.IO) {
-            SubscriptionRepository.regenerateActiveConfig()
-            if (_status.value == Status.Started) {
-                runCatching { CommandTarget.standaloneClient().serviceReload() }
-            }
-        }
+        // regenerate + hot-reload per core (mihomo API reload / Xray respawn /
+        // sing-box service reload) — a bare serviceReload() only reaches sing-box
+        refreshProxyConfig()
     }
 
     /**
@@ -1567,16 +1718,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Rebuilds the config from the new pool and hot-reloads the running core. */
     private fun applyPoolChange() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val config = SubscriptionRepository.regenerateActiveConfig()
-            if (config == null) {
-                _message.value = SubscriptionRepository.lastConfigError ?: "配置生成失败"
-                return@launch
-            }
-            if (_status.value == Status.Started) {
-                runCatching { CommandTarget.standaloneClient().serviceReload() }
-            }
-        }
+        // refreshProxyConfig regenerates from the new pool and dispatches the
+        // per-core reload (mihomo API / Xray respawn / sing-box serviceReload)
+        refreshProxyConfig()
     }
 
     fun clearMessage() {

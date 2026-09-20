@@ -33,6 +33,15 @@ class ClashApiClient(
         .readTimeout(10, TimeUnit.SECONDS)
         .build()
 
+    // PUT /configs applies the whole config synchronously — an airport raw
+    // config (thousands of rules / hundreds of proxies) can blow past the
+    // default 10s read timeout mid-request and read as a failed reload
+    private val reloadClient = OkHttpClient.Builder()
+        .proxy(java.net.Proxy.NO_PROXY)
+        .connectTimeout(2, TimeUnit.SECONDS)
+        .readTimeout(45, TimeUnit.SECONDS)
+        .build()
+
     private val base = "http://127.0.0.1:$port"
     private val auth get() = "Bearer $secret"
 
@@ -157,13 +166,13 @@ class ClashApiClient(
                 .header("Authorization", auth)
                 .put(payload)
                 .build()
-            call(request)
+            call(request, reloadClient)
             true
         }.getOrDefault(false)
     }
 
-    private fun call(request: Request): String {
-        client.newCall(request).execute().use { resp ->
+    private fun call(request: Request, httpClient: OkHttpClient = client): String {
+        httpClient.newCall(request).execute().use { resp ->
             val body = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) error("HTTP ${resp.code}: ${body.take(200)}")
             return body

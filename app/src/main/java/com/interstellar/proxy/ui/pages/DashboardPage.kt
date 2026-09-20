@@ -110,7 +110,10 @@ fun DashboardPage(
     val probe by viewModel.probe.collectAsState()
     val running = status == Status.Started
     val activeConnectionCount = connections.count { !it.closed }
+    // raw configs may not name any group "proxy" — fall back to the first selector
     val mainGroup = groups.find { it.tag == ConfigBuilder.GROUP_TAG }
+        ?: groups.firstOrNull { it.type.equals("selector", ignoreCase = true) }
+        ?: groups.firstOrNull()
     // tag → protocol (VLESS / TROJAN / …) for the current node pool
     val protocolByTag = remember(subscriptions, activeSubscriptionId, mixEnabled, mixSubscriptionIds) {
         val pool = SubscriptionRepository.poolOf(
@@ -874,7 +877,9 @@ private fun delayOfItem(item: com.interstellar.proxy.core.CoreGroupItem, delays:
     delays[item.tag]?.takeIf { it > 0 } ?: item.urlTestDelay
 
 private fun delayOf(groups: List<com.interstellar.proxy.core.CoreGroup>, delays: Map<String, Int>): Int {
-    val main = groups.find { it.tag == ConfigBuilder.GROUP_TAG } ?: return 0
+    val main = groups.find { it.tag == ConfigBuilder.GROUP_TAG }
+        ?: groups.firstOrNull { it.type.equals("selector", ignoreCase = true) }
+        ?: return 0
     val selected = main.selected ?: return 0
     val leaf = resolveNow(groups, delays, selected)
     delays[leaf]?.let { if (it > 0) return it }

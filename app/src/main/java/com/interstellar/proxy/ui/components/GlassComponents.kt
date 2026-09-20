@@ -405,6 +405,8 @@ fun PageHeader(
     kicker: String,
     title: String,
     modifier: Modifier = Modifier,
+    /** Small text riding the title's baseline (e.g. the active subscription). */
+    titleNote: String? = null,
     trailing: (@Composable () -> Unit)? = null,
 ) {
     val colors = LocalInterstellarColors.current
@@ -423,12 +425,27 @@ fun PageHeader(
                 letterSpacing = 2.5.sp,
             )
             Spacer(Modifier.height(4.dp))
-            Text(
-                title,
-                color = colors.text,
-                fontSize = 28.sp,
-                fontWeight = FontWeight.Bold,
-            )
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    title,
+                    color = colors.text,
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                if (!titleNote.isNullOrBlank()) {
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        titleNote,
+                        color = colors.textTertiary,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .padding(bottom = 5.dp),
+                    )
+                }
+            }
         }
         trailing?.invoke()
     }

@@ -95,8 +95,7 @@ object SubscriptionFetcher {
                         val body = it.body!!.string()
                         val info = it.header("subscription-userinfo")
                             ?.let { h -> parseSubscriptionUserinfo(h) }
-                        val name = it.header("Content-Disposition")
-                            ?.let { h -> CONTENT_DISPOSITION.find(h)?.groupValues?.get(1) }
+                        val name = parseDispositionName(it.header("Content-Disposition"))
                         FetchResult(
                             body = body,
                             uploadBytes = info?.get("upload") ?: 0,
@@ -123,7 +122,72 @@ object SubscriptionFetcher {
             }.toMap()
     }
 
-    private val CONTENT_DISPOSITION = Regex("""filename\s*=\s*"?([^";]+)"?""")
+    /**
+     * Content-Disposition display name, FlClash-compatible (satelite-proxy's
+     * parser): prefer RFC 5987 `filename*=UTF-8''%E8%89%AF…` — what CN panels
+     * actually send — then plain `filename=` (some servers percent-encode it
+     * too). A bare `filename=` regex misses the star form entirely and the
+     * subscription falls back to its URL host.
+     */
+    fun parseDispositionName(header: String?): String? {
+        if (header.isNullOrBlank()) return null
+        findDispositionParam(header, "filename*")?.let { star ->
+            decodeFilenameStar(star)
+                ?.let(::cleanDispositionName)
+                ?.takeIf { it.isNotEmpty() }
+                ?.let { return it }
+        }
+        findDispositionParam(header, "filename")?.let { plain ->
+            val unquoted = plain.trim().trim('"', '\'')
+            percentDecode(unquoted)
+                ?.let(::cleanDispositionName)
+                ?.takeIf { it.isNotEmpty() }
+                ?.let { return it }
+        }
+        return null
+    }
 
-    private const val USER_AGENT = "Interstellar/0.1 clash-verge/1.7.7 Android"
+    private fun findDispositionParam(disposition: String, key: String): String? =
+        disposition.split(';')
+            .map { it.trim() }
+            .firstNotNullOfOrNull { part ->
+                val idx = part.indexOf('=')
+                if (idx <= 0) return@firstNotNullOfOrNull null
+                if (part.substring(0, idx).trim().equals(key, ignoreCase = true)) {
+                    part.substring(idx + 1).trim()
+                } else {
+                    null
+                }
+            }
+
+    /** `UTF-8''%E8%89%AF…` (charset'lang'value) → decoded value. */
+    private fun decodeFilenameStar(raw: String): String? {
+        val trimmed = raw.trim().trim('"', '\'')
+        val value = when {
+            "''" in trimmed -> trimmed.substringAfter("''")
+            "'" in trimmed -> trimmed.substringAfter('\'')
+            else -> trimmed
+        }.trim()
+        if (value.isEmpty()) return null
+        return percentDecode(value)?.takeIf { it.isNotEmpty() }
+    }
+
+    /** URLDecoder also maps '+' to space — shield literal pluses first. */
+    private fun percentDecode(value: String): String? = runCatching {
+        java.net.URLDecoder.decode(value.replace("+", "%2B"), "UTF-8")
+    }.getOrDefault(value.takeIf { it.isNotBlank() })
+
+    /** Drop path components and common subscription file extensions. */
+    private fun cleanDispositionName(name: String): String {
+        var s = name.trim().substringAfterLast('/').substringAfterLast('\\')
+        for (ext in listOf(".yaml", ".yml", ".txt", ".conf", ".json")) {
+            if (s.lowercase().endsWith(ext)) {
+                s = s.dropLast(ext.length)
+                break
+            }
+        }
+        return s.trim()
+    }
+
+    private const val USER_AGENT = "Interstellar/0.5 clash-verge/v2.5 flclash/1 Android"
 }

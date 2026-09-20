@@ -5,6 +5,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -61,6 +62,8 @@ fun Modifier.iosPressable(onClick: () -> Unit): Modifier = composed {
 @Composable
 fun IosCard(
     modifier: Modifier = Modifier,
+    /** Optional accent outline (e.g. the active subscription card). */
+    border: Color? = null,
     content: @Composable () -> Unit,
 ) {
     val colors = LocalInterstellarColors.current
@@ -80,7 +83,14 @@ fun IosCard(
                 },
             )
             .clip(RoundedCornerShape(16.dp))
-            .glassSurface(16.dp, light, colors.panelTop, colors.panelBottom, colors.border),
+            .glassSurface(16.dp, light, colors.panelTop, colors.panelBottom, colors.border)
+            .then(
+                if (border != null) {
+                    Modifier.border(2.dp, border, RoundedCornerShape(16.dp))
+                } else {
+                    Modifier
+                },
+            ),
     ) {
         content()
     }
@@ -193,6 +203,7 @@ fun IosToggleRow(
     title: String,
     subtitle: String? = null,
     checked: Boolean,
+    enabled: Boolean = true,
     onChange: (Boolean) -> Unit,
 ) {
     val colors = LocalInterstellarColors.current
@@ -200,6 +211,7 @@ fun IosToggleRow(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
+            .alpha(if (enabled) 1f else 0.45f)
             .padding(horizontal = 16.dp, vertical = 10.dp),
     ) {
         Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
@@ -208,7 +220,7 @@ fun IosToggleRow(
                 Text(subtitle, color = colors.textTertiary, fontSize = 13.sp)
             }
         }
-        IosSwitch(checked = checked, onChange = onChange)
+        IosSwitch(checked = checked, onChange = { if (enabled) onChange(it) })
     }
 }
 

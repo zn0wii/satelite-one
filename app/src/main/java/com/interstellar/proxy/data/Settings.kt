@@ -142,6 +142,18 @@ object Settings {
             commit()
         }
 
+    /**
+     * Feed the active subscription's retained raw config (when its format
+     * matches the running core) instead of the rewritten one. Incompatible
+     * with mix mode — enabling this forces mix off.
+     */
+    var useRawConfigEnabled: Boolean
+        get() = properties.getProperty("useRawConfigEnabled", "false").toBoolean()
+        set(value) {
+            properties.setProperty("useRawConfigEnabled", value.toString())
+            commit()
+        }
+
     var mixSubscriptionIds: Set<String>
         get() = properties.getProperty("mixSubscriptionIds", "")
             .split('\n')
