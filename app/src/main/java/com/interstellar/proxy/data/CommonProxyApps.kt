@@ -14,6 +14,8 @@ object CommonProxyApps {
         "com.google.android.gsf",
         "com.google.android.gsf.login",
         "com.android.vending",
+        // system download provider — executes Play Store downloads
+        "com.android.providers.downloads",
     )
 
     fun matches(packageName: String, label: String): Boolean {

@@ -170,7 +170,10 @@ fun PerAppProxyPage(onBack: () -> Unit) {
 
         val visible = apps
             .asSequence()
-            .filter { showSystemApps || !it.systemApp }
+            // toggle off: launchable non-system apps (the drawer list);
+            // toggle on: every installed package, launcher-less system
+            // components included (Google Play 服务 / Google 服务框架 …)
+            .filter { if (showSystemApps) true else it.launchable && !it.systemApp }
             .filter {
                 search.isBlank() ||
                     it.label.contains(search, true) ||

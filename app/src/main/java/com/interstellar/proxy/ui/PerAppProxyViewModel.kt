@@ -23,6 +23,8 @@ data class AppEntry(
     val icon: Drawable?,
     val isSelf: Boolean = false,
     val systemApp: Boolean = false,
+    /** Has a launcher entry; false for background system components (GMS, GSF…). */
+    val launchable: Boolean = true,
 )
 
 /**
@@ -65,22 +67,34 @@ class PerAppProxyViewModel(application: Application) : AndroidViewModel(applicat
         val self = context.packageName
         val launcherApps = context.getSystemService(LauncherApps::class.java)
 
-        val packageNames = mutableSetOf(self)
+        // packages with a launcher entry — the default (toggle-off) list
+        val launchable = mutableSetOf(self)
         // LauncherApps lists launchable apps for the current user without
         // needing QUERY_ALL_PACKAGES on Android 11+; fall back to PM queries.
         runCatching {
             launcherApps?.getActivityList(null, Process.myUserHandle())?.forEach { info ->
-                packageNames.add(info.componentName.packageName)
+                launchable.add(info.componentName.packageName)
             }
         }.onFailure {
             pm.getInstalledApplications(PackageManager.GET_META_DATA).forEach { info ->
                 if (pm.getLaunchIntentForPackage(info.packageName) != null || info.packageName == self) {
-                    packageNames.add(info.packageName)
+                    launchable.add(info.packageName)
                 }
             }
         }
 
-        packageNames.mapNotNull { pkg ->
+        // every installed package — QUERY_ALL_PACKAGES is declared, so this
+        // also covers launcher-less components a whitelist needs but no app
+        // drawer ever shows (Google Play 服务 / Google 服务框架 / the system
+        // download provider), including disabled ones on CN ROMs
+        val installed = mutableSetOf(self)
+        runCatching {
+            pm.getInstalledPackages(0).forEach { pi ->
+                pi.applicationInfo?.let { installed.add(it.packageName) }
+            }
+        }
+
+        (installed + launchable).mapNotNull { pkg ->
             runCatching {
                 val info = pm.getApplicationInfo(pkg, 0)
                 AppEntry(
@@ -89,6 +103,7 @@ class PerAppProxyViewModel(application: Application) : AndroidViewModel(applicat
                     icon = runCatching { info.loadIcon(pm) }.getOrNull(),
                     isSelf = pkg == self,
                     systemApp = (info.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0,
+                    launchable = pkg in launchable,
                 )
             }.getOrNull()
         }.sortedWith(compareByDescending<AppEntry> { it.isSelf }.thenBy { it.label.lowercase() })
