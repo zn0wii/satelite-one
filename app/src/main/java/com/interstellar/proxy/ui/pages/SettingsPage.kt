@@ -39,6 +39,7 @@ import com.interstellar.proxy.BuildConfig
 import com.interstellar.proxy.data.CustomRulesStore
 import com.interstellar.proxy.data.DnsOverridesStore
 import com.interstellar.proxy.data.Settings
+import com.interstellar.proxy.data.net.AppUpdateChecker
 import com.interstellar.proxy.ui.components.GlassCard
 import com.interstellar.proxy.ui.components.IosSectionFooter
 import com.interstellar.proxy.ui.components.IosSwitch
@@ -47,6 +48,7 @@ import com.interstellar.proxy.ui.components.SegmentedControl
 import com.interstellar.proxy.ui.components.pressableClick
 import com.interstellar.proxy.ui.theme.Accents
 import com.interstellar.proxy.ui.theme.LocalInterstellarColors
+import kotlinx.coroutines.launch
 
 private var onThemeChanged: (() -> Unit)? = null
 
@@ -233,6 +235,7 @@ fun SettingsPage(onOpen: (SettingsSubPage) -> Unit, onProxyChanged: () -> Unit =
                 },
             )
             PrefNavRow(title = "版本", value = BuildConfig.VERSION_NAME)
+            UpdateCheckRow()
             PrefNavRow(title = "内核", value = "sing-box 1.14.0")
         }
 
@@ -252,6 +255,99 @@ private fun PrefSectionLabel(text: String) {
         letterSpacing = 2.sp,
         modifier = Modifier.padding(start = 12.dp, bottom = 8.dp),
     )
+}
+
+/**
+ * 检查更新 row: checks the GitHub release tag on demand; a newer tag turns
+ * the row + trailing capsule into a jump to the releases page.
+ */
+@Composable
+private fun UpdateCheckRow() {
+    val colors = LocalInterstellarColors.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var checking by remember { mutableStateOf(false) }
+    var result by remember { mutableStateOf<AppUpdateChecker.Result?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    fun openReleases() {
+        runCatching {
+            context.startActivity(
+                android.content.Intent(
+                    android.content.Intent.ACTION_VIEW,
+                    android.net.Uri.parse(AppUpdateChecker.RELEASES_PAGE),
+                ),
+            )
+        }
+    }
+
+    fun startCheck() {
+        if (checking) return
+        checking = true
+        error = null
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            result = runCatching { AppUpdateChecker.check() }.getOrElse {
+                error = it.message ?: "网络错误"
+                null
+            }
+            checking = false
+        }
+    }
+
+    PrefRowShell(
+        title = "检查更新",
+        desc = when (val r = result) {
+            is AppUpdateChecker.Result.UpdateAvailable ->
+                "发现新版本 v${r.latestTag},点击前往 GitHub 下载"
+
+            is AppUpdateChecker.Result.UpToDate ->
+                "当前已是最新版本 (v${r.currentTag})"
+
+            null -> if (error != null) "检查失败:$error" else "检测 GitHub 上的最新 Release"
+        },
+        onClick = if (result is AppUpdateChecker.Result.UpdateAvailable) {
+            { openReleases() }
+        } else {
+            null
+        },
+    ) {
+        when {
+            checking -> CircularProgressIndicator(
+                modifier = Modifier.size(20.dp),
+                strokeWidth = 2.dp,
+                color = colors.primary,
+            )
+
+            result is AppUpdateChecker.Result.UpdateAvailable -> CapsuleAction(
+                text = "前往更新",
+                accent = colors.primary,
+                onClick = { openReleases() },
+            )
+
+            else -> CapsuleAction(text = "检查", accent = colors.text, onClick = { startCheck() })
+        }
+    }
+}
+
+/** Small capsule action chip for trailing slots (same style as 规则文件's 更新). */
+@Composable
+private fun CapsuleAction(text: String, accent: androidx.compose.ui.graphics.Color, onClick: () -> Unit) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(accent.copy(alpha = 0.13f))
+            .border(1.dp, accent.copy(alpha = 0.55f), RoundedCornerShape(50))
+            .pressableClick { onClick() }
+            .padding(horizontal = 16.dp, vertical = 7.dp),
+    ) {
+        Text(
+            text,
+            color = accent,
+            fontSize = 13.sp,
+            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+        )
+    }
 }
 
 @Composable
@@ -601,22 +697,7 @@ fun ProxySettingsPage(viewModel: com.interstellar.proxy.ui.AppViewModel, onOpen:
                         color = colors.primary,
                     )
                 } else {
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(colors.primary.copy(alpha = 0.13f))
-                            .border(1.dp, colors.primary.copy(alpha = 0.55f), RoundedCornerShape(50))
-                            .pressableClick { viewModel.updateRuleFiles() }
-                            .padding(horizontal = 16.dp, vertical = 7.dp),
-                    ) {
-                        Text(
-                            "更新",
-                            color = colors.primary,
-                            fontSize = 13.sp,
-                            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
-                        )
-                    }
+                    CapsuleAction(text = "更新", accent = colors.primary) { viewModel.updateRuleFiles() }
                 }
             }
         }
