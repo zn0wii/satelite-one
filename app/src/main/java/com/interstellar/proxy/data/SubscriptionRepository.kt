@@ -124,6 +124,11 @@ object SubscriptionRepository {
         if (activeSubscriptionId == id) {
             activeSubscriptionId = subscriptions.firstOrNull()?.id ?: ""
         }
+        // 删光订阅时把磁盘上的活动配置一并清掉,否则静态分组解析会把
+        // 旧配置"复活"成节点列表
+        if (subscriptions.isEmpty()) {
+            ConfigStore.clear()
+        }
         val remaining = Settings.mixSubscriptionIds - id
         Settings.mixSubscriptionIds =
             if (Settings.mixEnabled && remaining.isEmpty() && subscriptions.isNotEmpty()) {

@@ -23,4 +23,9 @@ object ConfigStore {
         activeFile.parentFile?.mkdirs()
         activeFile.writeText(content)
     }
+
+    /** Drop the active config (all subscriptions removed — nothing to run). */
+    fun clear() {
+        runCatching { activeFile.delete() }
+    }
 }

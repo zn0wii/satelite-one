@@ -49,6 +49,16 @@ class ServiceNotification(private val status: MutableLiveData<Status>, private v
         CommandClient(GlobalScope, CommandClient.ConnectionType.Status, this, localOnly = true)
     private var receiverRegistered = false
 
+    /**
+     * Set by close(): the service notification is gone. A late traffic
+     * callback (mihomo poller races core shutdown — trafficJob is cancelled
+     * only after close) must not re-post it via NotificationManager.notify —
+     * that re-posted notification is no longer bound to the foreground
+     * service and survives stopSelf() as a stale "still connected" one.
+     */
+    @Volatile
+    private var released = false
+
     private val notificationBuilder by lazy {
         NotificationCompat.Builder(service, notificationChannel).setShowWhen(false).setOngoing(true)
             .setContentTitle(service.getString(R.string.app_tagline)).setOnlyAlertOnce(true)
@@ -80,6 +90,7 @@ class ServiceNotification(private val status: MutableLiveData<Status>, private v
     }
 
     fun show(profileName: String, @StringRes contentTextId: Int) {
+        released = false
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             InterstellarApplication.notification.createNotificationChannel(
                 NotificationChannel(
@@ -139,7 +150,7 @@ class ServiceNotification(private val status: MutableLiveData<Status>, private v
 
     /** Engine-agnostic traffic line (mihomo poller calls this directly). */
     fun updateTraffic(upPerSecond: Long, downPerSecond: Long) {
-        if (!Settings.dynamicNotification || !checkPermission()) return
+        if (released || !Settings.dynamicNotification || !checkPermission()) return
         val content =
             Libbox.formatBytes(upPerSecond) + "/s ↑\t" + Libbox.formatBytes(downPerSecond) + "/s ↓"
         InterstellarApplication.notificationManager.notify(
@@ -157,8 +168,12 @@ class ServiceNotification(private val status: MutableLiveData<Status>, private v
     }
 
     fun close() {
+        released = true
         commandClient.disconnect()
         ServiceCompat.stopForeground(service, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        // a traffic update may have slipped in just before stopForeground ran;
+        // cancel it explicitly — it would not be removed by service death
+        InterstellarApplication.notificationManager.cancel(notificationId)
         if (receiverRegistered) {
             service.unregisterReceiver(this)
             receiverRegistered = false

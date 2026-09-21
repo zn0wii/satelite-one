@@ -159,11 +159,16 @@ class BoxService(private val service: Service, private val platformInterface: Pl
 
             if (status.value != Status.Starting) return
             android.util.Log.d("InterstellarUI", "core STARTED")
-            status.postValue(Status.Started)
+            // flip to Started and post the notification on the main thread
+            // atomically wrt stopService (also main-thread): a show() that
+            // slips past a stop would resurrect the notification after close()
             withContext(Dispatchers.Main) {
-                notification.show(service.getString(R.string.app_tagline), R.string.status_started)
+                if (status.value == Status.Starting) {
+                    status.value = Status.Started
+                    notification.show(service.getString(R.string.app_tagline), R.string.status_started)
+                    notification.start()
+                }
             }
-            notification.start()
         } catch (e: Exception) {
             stopAndAlert(Alert.StartService, e.message)
             return

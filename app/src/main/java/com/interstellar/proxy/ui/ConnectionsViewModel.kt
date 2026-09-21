@@ -32,6 +32,8 @@ data class ActiveConnection(
     val protocol: String,
     val rule: String,
     val chains: List<String>,
+    /** Originating process (mihomo metadata; null when the core doesn't report it). */
+    val process: String? = null,
     val createdAt: Long,
     val uplink: Long,
     val downlink: Long,
@@ -171,6 +173,8 @@ class ConnectionsViewModel(application: Application) : AndroidViewModel(applicat
                     c["rulePayload"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() },
                 ).joinToString("(").let { if (it.contains("(")) "$it)" else it },
                 chains = (c["chains"] as? JsonArray)?.map { it.jsonPrimitive.content } ?: emptyList(),
+                process = str("processPath")?.substringAfterLast('/')
+                    ?: str("process")?.takeIf { it.isNotBlank() },
                 createdAt = parseClashTime(c["start"]?.jsonPrimitive?.content) ?: now,
                 uplink = c["upload"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0,
                 downlink = c["download"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0,

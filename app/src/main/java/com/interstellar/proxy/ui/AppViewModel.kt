@@ -1667,7 +1667,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun removeSubscription(id: String) {
+        val wasActive = id == SubscriptionRepository.activeSubscriptionId
         SubscriptionRepository.remove(id)
+        when {
+            SubscriptionRepository.subscriptions.isEmpty() -> {
+                // 删光了:节点/分组全清,停掉还在吃旧配置的内核
+                _groups.value = emptyList()
+                _delays.value = emptyMap()
+                _staticGroups.value = emptyList()
+                if (_status.value == Status.Started || _status.value == Status.Starting) {
+                    com.interstellar.proxy.bg.BoxService.stop()
+                }
+            }
+
+            // 删除的是激活订阅 → 激活项已顺延,重建配置并热重载
+            wasActive -> refreshProxyConfig()
+        }
         refreshStaticGroups()
         _subscriptions.value = SubscriptionRepository.subscriptions.toList()
         _activeSubscriptionId.value = SubscriptionRepository.activeSubscriptionId
