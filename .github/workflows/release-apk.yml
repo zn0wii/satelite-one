@@ -129,18 +129,18 @@ jobs:
           chmod +x gradlew
           ./gradlew :app:assembleRelease --no-daemon
 
-      # interstellar-<abi>-release.apk → interstellar-<abi>-<tag>.apk
+      # satelite-one-<abi>-release.apk → satelite-one-<abi>-<tag>.apk
       - name: Rename APKs with tag
         run: |
           cd app/build/outputs/apk/release
-          for f in interstellar-*-release.apk; do
+          for f in satelite-one-*-release.apk; do
             mv "$f" "${f%-release.apk}-${GITHUB_REF_NAME}.apk"
           done
 
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: interstellar-${{ github.ref_name }}
+          name: satelite-one-${{ github.ref_name }}
           path: app/build/outputs/apk/release/*.apk
 
       # 更新摘要 = "版本提交"(范围内最后改 version.properties 的那个)的完整

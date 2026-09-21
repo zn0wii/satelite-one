@@ -90,14 +90,14 @@ android {
     }
 }
 
-// APK 输出统一以 interstellar 开头：interstellar-<abi>-<buildType>.apk
+// APK 输出统一以 satelite-one 开头：satelite-one-<abi>-<buildType>.apk
 androidComponents {
     onVariants { variant ->
         variant.outputs.forEach { output ->
             val abi = output.filters
                 .firstOrNull { it.filterType == FilterConfiguration.FilterType.ABI }
                 ?.identifier
-            output.outputFileName.set("interstellar-${abi ?: "universal"}-${variant.name}.apk")
+            output.outputFileName.set("satelite-one-${abi ?: "universal"}-${variant.name}.apk")
         }
     }
 }
