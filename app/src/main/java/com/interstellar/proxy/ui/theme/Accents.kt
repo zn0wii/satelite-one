@@ -15,15 +15,15 @@ import com.interstellar.proxy.data.Settings
  */
 object Accents {
 
-    data class Preset(val id: String, val label: String, val light: Color, val dark: Color)
+    data class Preset(val id: String, @androidx.annotation.StringRes val labelRes: Int, val light: Color, val dark: Color)
 
     val presets = listOf(
-        Preset("mint", "薄荷", Color(0xFF1F9A72), Color(0xFF55C89A)),
-        Preset("sky", "天蓝", Color(0xFF2C6FAE), Color(0xFF64B5F6)),
-        Preset("taro", "香芋", Color(0xFF7E5CD6), Color(0xFFB49AF0)),
-        Preset("peach", "蜜桃", Color(0xFFC9556F), Color(0xFFF29CB2)),
-        Preset("milk", "奶橙", Color(0xFFB36A1C), Color(0xFFF2B063)),
-        Preset("lake", "湖青", Color(0xFF1E8A96), Color(0xFF5FCBD8)),
+        Preset("mint", com.interstellar.proxy.R.string.accent_mint, Color(0xFF1F9A72), Color(0xFF55C89A)),
+        Preset("sky", com.interstellar.proxy.R.string.accent_sky, Color(0xFF2C6FAE), Color(0xFF64B5F6)),
+        Preset("taro", com.interstellar.proxy.R.string.accent_taro, Color(0xFF7E5CD6), Color(0xFFB49AF0)),
+        Preset("peach", com.interstellar.proxy.R.string.accent_peach, Color(0xFFC9556F), Color(0xFFF29CB2)),
+        Preset("milk", com.interstellar.proxy.R.string.accent_milk, Color(0xFFB36A1C), Color(0xFFF2B063)),
+        Preset("lake", com.interstellar.proxy.R.string.accent_lake, Color(0xFF1E8A96), Color(0xFF5FCBD8)),
     )
 
     /** Legacy ids (old glow palette / plain "green") mapped onto the new presets. */

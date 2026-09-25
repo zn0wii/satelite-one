@@ -96,14 +96,18 @@ object AppUpdateChecker {
                 val request = Request.Builder().url(RELEASES_PAGE).build()
                 val tag = client.newCall(request).execute().use { response ->
                     if (!response.isRedirect) error("HTTP ${response.code}")
-                    val location = response.header("Location") ?: error("重定向缺少 Location")
-                    extractTag(location) ?: error("无法从重定向解析版本号")
+                    val location = response.header("Location")
+                        ?: error(com.interstellar.proxy.ktx.AppLanguage.getString(InterstellarApplication.application, com.interstellar.proxy.R.string.update_no_location))
+                    extractTag(location)
+                        ?: error(com.interstellar.proxy.ktx.AppLanguage.getString(InterstellarApplication.application, com.interstellar.proxy.R.string.update_no_tag))
                 }
                 return@withContext tag
             } catch (e: Exception) {
                 lastError = e
             }
         }
-        throw lastError ?: IllegalStateException("检查更新失败")
+        throw lastError ?: IllegalStateException(
+            com.interstellar.proxy.ktx.AppLanguage.getString(InterstellarApplication.application, com.interstellar.proxy.R.string.update_check_failed),
+        )
     }
 }

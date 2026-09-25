@@ -261,6 +261,15 @@ object Settings {
             commit()
         }
 
+    /** App language: "system" (default) | "zh" | "en"; attachBaseContext re-reads after invalidate. */
+    var appLanguage: String
+        get() = properties.getProperty("appLanguage", com.interstellar.proxy.ktx.AppLanguage.SYSTEM)
+        set(value) {
+            properties.setProperty("appLanguage", value)
+            commit()
+            com.interstellar.proxy.ktx.AppLanguage.invalidate()
+        }
+
     /** Legacy key from the pre-glow era; the macaron accent (see ui.theme.Accents) replaced it. */
     var glowColorId: String
         get() = properties.getProperty("glowColorId", "matcha")

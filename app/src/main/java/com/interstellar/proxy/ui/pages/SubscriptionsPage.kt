@@ -42,10 +42,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.interstellar.proxy.R
 import com.interstellar.proxy.data.Settings
 import com.interstellar.proxy.data.SubscriptionRepository
 import com.interstellar.proxy.data.UpdateWorker
@@ -93,10 +95,10 @@ fun SubscriptionsPage(viewModel: AppViewModel) {
         ) {
             PageHeader(
                 kicker = "SUBSCRIPTIONS",
-                title = "订阅",
+                title = stringResource(R.string.subs_title),
                 trailing = {
                     Text(
-                        "＋ 添加",
+                        stringResource(R.string.subs_add),
                         color = colors.accent,
                         fontSize = 14.sp,
                         fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
@@ -108,30 +110,30 @@ fun SubscriptionsPage(viewModel: AppViewModel) {
                 },
             )
 
-            IosSectionLabel("配置模式")
+            IosSectionLabel(stringResource(R.string.subs_config_mode_section))
             IosCard(modifier = Modifier.fillMaxWidth()) {
                 IosToggleRow(
-                    title = "使用原始配置",
+                    title = stringResource(R.string.subs_use_raw_config_title),
                     subtitle = when {
-                        useRawConfig -> "激活订阅的原始配置直通内核(不重写),自动注入内置规则"
-                        else -> "订阅是完整配置且与内核匹配时,原文直供内核"
+                        useRawConfig -> stringResource(R.string.subs_use_raw_config_on)
+                        else -> stringResource(R.string.subs_use_raw_config_off)
                     },
                     checked = useRawConfig,
                     onChange = { viewModel.setUseRawConfig(it) },
                 )
             }
             IosSectionFooter(
-                "开启后保留订阅原有的分组与规则结构,仅注入绕过大陆等内置规则;不支持合并订阅与自定义规则。内核不匹配时自动回退重写模式。",
+                stringResource(R.string.subs_use_raw_config_footer),
             )
 
             Spacer(Modifier.height(8.dp))
-            IosSectionLabel("合并订阅 (Mix)")
+            IosSectionLabel(stringResource(R.string.subs_mix_section))
             IosCard(modifier = Modifier.fillMaxWidth()) {
                 IosToggleRow(
-                    title = "合并多个订阅",
+                    title = stringResource(R.string.subs_mix_title),
                     subtitle = when {
-                        useRawConfig -> "原始配置模式下不可用"
-                        mixEnabled -> "已勾选 ${mixIds.size} / ${subscriptions.size} 个订阅"
+                        useRawConfig -> stringResource(R.string.subs_mix_unavailable)
+                        mixEnabled -> stringResource(R.string.subs_mix_checked_count, mixIds.size, subscriptions.size)
                         else -> null
                     },
                     checked = mixEnabled,
@@ -139,14 +141,14 @@ fun SubscriptionsPage(viewModel: AppViewModel) {
                     onChange = { viewModel.setMixEnabled(it) },
                 )
             }
-            IosSectionFooter("开启后节点池为所有勾选订阅的合集,节点页会标注来源;流量与到期仍按订阅独立显示。")
+            IosSectionFooter(stringResource(R.string.subs_mix_footer))
 
             Spacer(Modifier.height(8.dp))
-            IosSectionLabel("自动更新")
+            IosSectionLabel(stringResource(R.string.subs_auto_update_section))
             IosCard(modifier = Modifier.fillMaxWidth()) {
                 Column {
                     IosToggleRow(
-                        title = "自动更新",
+                        title = stringResource(R.string.subs_auto_update_title),
                         checked = autoUpdate,
                         onChange = {
                             autoUpdate = it
@@ -157,7 +159,12 @@ fun SubscriptionsPage(viewModel: AppViewModel) {
                     if (autoUpdate) {
                         Box(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 14.dp)) {
                             SegmentedControl(
-                                items = listOf("每小时", "6 小时", "12 小时", "每天"),
+                                items = listOf(
+                                    stringResource(R.string.subs_interval_hourly),
+                                    stringResource(R.string.subs_interval_6h),
+                                    stringResource(R.string.subs_interval_12h),
+                                    stringResource(R.string.subs_interval_daily),
+                                ),
                                 selected = listOf(1, 6, 12, 24).indexOf(interval).coerceAtLeast(1),
                                 onSelect = { index ->
                                     interval = listOf(1, 6, 12, 24)[index]
@@ -170,13 +177,13 @@ fun SubscriptionsPage(viewModel: AppViewModel) {
                     }
                 }
             }
-            IosSectionFooter("在后台定时刷新订阅,内核运行时自动热重载生效。")
+            IosSectionFooter(stringResource(R.string.subs_auto_update_footer))
 
             Spacer(Modifier.height(8.dp))
-            IosSectionLabel("订阅")
+            IosSectionLabel(stringResource(R.string.subs_list_section))
 
             if (subscriptions.isEmpty()) {
-                EmptyHint(text = "点右上角添加订阅")
+                EmptyHint(text = stringResource(R.string.subs_empty_hint))
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     subscriptions.forEach { sub ->
@@ -231,10 +238,15 @@ fun SubscriptionsPage(viewModel: AppViewModel) {
                     .background(colors.panelSolid)
                     .padding(18.dp),
             ) {
-                Text("删除订阅", color = colors.text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    stringResource(R.string.subs_delete_title),
+                    color = colors.text,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                )
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    "将删除「${target.name}」及其节点,无法恢复。",
+                    stringResource(R.string.subs_delete_confirm, target.name),
                     color = colors.textSecondary,
                     fontSize = 13.sp,
                 )
@@ -244,9 +256,9 @@ fun SubscriptionsPage(viewModel: AppViewModel) {
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    ActionChip(text = "取消") { deleteTarget = null }
+                    ActionChip(text = stringResource(R.string.subs_cancel)) { deleteTarget = null }
                     Spacer(Modifier.width(10.dp))
-                    ActionChip(text = "删除", danger = true) {
+                    ActionChip(text = stringResource(R.string.subs_delete), danger = true) {
                         viewModel.removeSubscription(target.id)
                         deleteTarget = null
                     }
@@ -302,9 +314,9 @@ private fun SubscriptionCard(
     val expireText = if (sub.expireSeconds > 0) {
         val days = ((sub.expireSeconds * 1000 - System.currentTimeMillis()) / 86_400_000L).toInt()
         when {
-            days < 0 -> "已过期"
-            days == 0 -> "今天到期"
-            else -> "$days 天后到期"
+            days < 0 -> stringResource(R.string.subs_expired)
+            days == 0 -> stringResource(R.string.subs_expire_today)
+            else -> stringResource(R.string.subs_expire_in_days, days)
         }
     } else {
         null
@@ -332,12 +344,21 @@ private fun SubscriptionCard(
                     } else {
                         Icons.Outlined.RadioButtonUnchecked
                     },
-                    contentDescription = if (checked) "已加入" else "未加入",
+                    contentDescription = if (checked) {
+                        stringResource(R.string.subs_joined)
+                    } else {
+                        stringResource(R.string.subs_not_joined)
+                    },
                     tint = if (checked) colors.primary else colors.border,
                     modifier = Modifier.size(22.dp),
                 )
 
-                active -> Text("使用中", color = colors.primary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                active -> Text(
+                    stringResource(R.string.subs_active),
+                    color = colors.primary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
             }
         }
         Spacer(Modifier.height(10.dp))
@@ -352,7 +373,11 @@ private fun SubscriptionCard(
                 fontSize = 13.sp,
                 modifier = Modifier.weight(1f),
             )
-            Text("${sub.nodes.size} 个节点", color = colors.textSecondary, fontSize = 13.sp)
+            Text(
+                stringResource(R.string.subs_node_count, sub.nodes.size),
+                color = colors.textSecondary,
+                fontSize = 13.sp,
+            )
             val format = com.interstellar.proxy.data.subscription.RawConfigFormat.from(sub.configFormat)
             if (format != null) {
                 Spacer(Modifier.width(8.dp))
@@ -373,7 +398,11 @@ private fun SubscriptionCard(
                 FormatBadge(
                     label = format.label,
                     active = rawOn,
-                    activeHint = if (effective) "原始" else "已回退重写",
+                    activeHint = if (effective) {
+                        stringResource(R.string.subs_raw_badge_on)
+                    } else {
+                        stringResource(R.string.subs_raw_badge_fallback)
+                    },
                 )
             }
         }
@@ -416,7 +445,7 @@ private fun SubscriptionCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                "编辑",
+                stringResource(R.string.subs_edit),
                 color = colors.accent,
                 fontSize = 15.sp,
                 modifier = Modifier.iosPressable { onEdit() },
@@ -430,7 +459,7 @@ private fun SubscriptionCard(
                     }
                 }
                 Text(
-                    if (copied) "已复制" else "复制",
+                    if (copied) stringResource(R.string.subs_copied) else stringResource(R.string.subs_copy),
                     color = colors.accent,
                     fontSize = 15.sp,
                     modifier = Modifier.iosPressable {
@@ -443,14 +472,14 @@ private fun SubscriptionCard(
                     },
                 )
                 Text(
-                    "更新",
+                    stringResource(R.string.subs_update),
                     color = colors.accent,
                     fontSize = 15.sp,
                     modifier = Modifier.iosPressable { onRefresh() },
                 )
             }
             Text(
-                "删除",
+                stringResource(R.string.subs_delete),
                 color = colors.danger,
                 fontSize = 15.sp,
                 modifier = Modifier.iosPressable { onDelete() },
@@ -528,13 +557,18 @@ private fun EditSubscriptionDialog(
                 .background(colors.panelSolid)
                 .padding(18.dp),
         ) {
-            Text("编辑订阅", color = colors.text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text(
+                stringResource(R.string.subs_edit_title),
+                color = colors.text,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+            )
             Spacer(Modifier.height(14.dp))
             androidx.compose.material3.OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("名称", color = colors.textTertiary, fontSize = 12.sp) },
+                placeholder = { Text(stringResource(R.string.subs_field_name), color = colors.textTertiary, fontSize = 12.sp) },
                 singleLine = true,
                 shape = RoundedCornerShape(12.dp),
                 colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
@@ -550,7 +584,7 @@ private fun EditSubscriptionDialog(
                 value = url,
                 onValueChange = { url = it },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("订阅链接(可选)", color = colors.textTertiary, fontSize = 12.sp) },
+                placeholder = { Text(stringResource(R.string.subs_field_url_optional), color = colors.textTertiary, fontSize = 12.sp) },
                 singleLine = true,
                 shape = RoundedCornerShape(12.dp),
                 colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
@@ -567,9 +601,9 @@ private fun EditSubscriptionDialog(
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                ActionChip(text = "取消") { onDismiss() }
+                ActionChip(text = stringResource(R.string.subs_cancel)) { onDismiss() }
                 Spacer(Modifier.width(10.dp))
-                ActionChip(text = "保存", primary = true) {
+                ActionChip(text = stringResource(R.string.subs_save), primary = true) {
                     onSave(name, url)
                 }
             }

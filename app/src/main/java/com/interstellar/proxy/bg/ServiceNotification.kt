@@ -92,10 +92,12 @@ class ServiceNotification(private val status: MutableLiveData<Status>, private v
     fun show(profileName: String, @StringRes contentTextId: Int) {
         released = false
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // re-creating with the same id updates the stored channel name on
+            // language switches
             InterstellarApplication.notification.createNotificationChannel(
                 NotificationChannel(
                     notificationChannel,
-                    "Service Notifications",
+                    service.getString(R.string.channel_service),
                     NotificationManager.IMPORTANCE_LOW,
                 ),
             )

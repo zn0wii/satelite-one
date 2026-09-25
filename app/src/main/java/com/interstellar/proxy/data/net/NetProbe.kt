@@ -22,6 +22,7 @@ object NetProbe {
 
     data class Result(
         val ip: String,
+        /** ISO country CODE (localized for display via LocalizedNames). */
         val country: String? = null,
         val latencyMs: Long,
         val viaProxy: Boolean,
@@ -35,29 +36,18 @@ object NetProbe {
         val parse: (String) -> Pair<String?, String?>,
     )
 
-    // country codes → 中文, matching the matcher vocabulary used elsewhere
-    private val countryNames = mapOf(
-        "CN" to "中国", "HK" to "香港", "TW" to "台湾", "JP" to "日本",
-        "KR" to "韩国", "SG" to "新加坡", "US" to "美国", "CA" to "加拿大",
-        "GB" to "英国", "DE" to "德国", "FR" to "法国", "NL" to "荷兰",
-        "RU" to "俄罗斯", "AU" to "澳大利亚", "IN" to "印度", "TR" to "土耳其",
-        "BR" to "巴西", "TH" to "泰国", "VN" to "越南", "MY" to "马来西亚",
-        "PH" to "菲律宾", "ID" to "印度尼西亚", "IT" to "意大利", "ES" to "西班牙",
-        "SE" to "瑞典", "CH" to "瑞士", "AE" to "阿联酋", "AR" to "阿根廷",
-    )
-
     private val endpoints = listOf(
         Endpoint("https://api.ip.sb/geoip") { body ->
             val ip = regexGroup(body, """"query"\s*:\s*"([^"]+)"""")
                 ?: regexGroup(body, """"ip"\s*:\s*"([^"]+)"""")
             val cc = regexGroup(body, """"country_code"\s*:\s*"([^"]+)"""")
                 ?: regexGroup(body, """"country"\s*:\s*"([^"]+)"""")
-            ip to cc?.let { countryNames[it.uppercase()] ?: it }
+            ip to cc?.uppercase()
         },
         Endpoint("http://ip-api.com/json?fields=status(query,countryCode)") { body ->
             val ip = regexGroup(body, """"query"\s*:\s*"([^"]+)"""")
             val cc = regexGroup(body, """"countryCode"\s*:\s*"([^"]+)"""")
-            ip to cc?.let { countryNames[it.uppercase()] ?: it }
+            ip to cc?.uppercase()
         },
         Endpoint("https://api.ipify.org?format=json") { body ->
             (regexGroup(body, """"ip"\s*:\s*"([^"]+)"""") ?: body.trim()) to null
@@ -146,7 +136,9 @@ object NetProbe {
                 }.getOrNull()
             }
         }.map { it.await() }.firstOrNull { it != null }
-        winner ?: error("所有探测端点均失败")
+        winner ?: error(
+            com.interstellar.proxy.ktx.AppLanguage.getString(InterstellarApplication.application, com.interstellar.proxy.R.string.probe_all_failed),
+        )
     }
 
     private fun regexGroup(body: String, pattern: String): String? =

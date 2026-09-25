@@ -31,16 +31,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.interstellar.proxy.R
 import com.interstellar.proxy.constant.Status
 import com.interstellar.proxy.ui.ActiveConnection
 import com.interstellar.proxy.ui.AppViewModel
 import com.interstellar.proxy.ui.ConnectionsViewModel
 import com.interstellar.proxy.ui.components.GlassCard
 import com.interstellar.proxy.ui.components.pressableClick
+import com.interstellar.proxy.ui.localizedGroupName
 import com.interstellar.proxy.ui.theme.LocalInterstellarColors
 import io.nekohasekai.libbox.Libbox
 
@@ -68,7 +71,7 @@ fun ConnectionsPage(viewModel: ConnectionsViewModel, appViewModel: AppViewModel)
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    "活跃 ${active.size}",
+                    stringResource(R.string.conn_active_count, active.size),
                     color = colors.text,
                     fontSize = 17.sp,
                     fontWeight = FontWeight.Bold,
@@ -87,7 +90,7 @@ fun ConnectionsPage(viewModel: ConnectionsViewModel, appViewModel: AppViewModel)
                         .pressableClick { viewModel.closeAll() }
                         .padding(horizontal = 14.dp, vertical = 8.dp),
                 ) {
-                    Text("全部断开", color = colors.danger, fontSize = 12.sp)
+                    Text(stringResource(R.string.conn_close_all), color = colors.danger, fontSize = 12.sp)
                 }
             }
         }
@@ -97,7 +100,7 @@ fun ConnectionsPage(viewModel: ConnectionsViewModel, appViewModel: AppViewModel)
             value = search,
             onValueChange = { search = it },
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("搜索域名 / 规则", color = colors.textTertiary) },
+            placeholder = { Text(stringResource(R.string.conn_search_hint), color = colors.textTertiary) },
             singleLine = true,
             shape = RoundedCornerShape(12.dp),
             colors = OutlinedTextFieldDefaults.colors(
@@ -111,8 +114,10 @@ fun ConnectionsPage(viewModel: ConnectionsViewModel, appViewModel: AppViewModel)
         Spacer(Modifier.height(10.dp))
 
         when {
-            !kernelUp -> EmptyHint(text = "内核未运行")
-            connections.isEmpty() -> EmptyHint(text = if (connected) "暂无连接" else "正在同步连接…")
+            !kernelUp -> EmptyHint(text = stringResource(R.string.conn_kernel_not_running))
+            connections.isEmpty() -> EmptyHint(
+                text = if (connected) stringResource(R.string.conn_empty) else stringResource(R.string.conn_syncing),
+            )
             else -> {
                 val filtered = connections.filter {
                     search.isBlank() || it.domain.contains(search, true) ||
@@ -170,14 +175,13 @@ private fun ConnectionRow(conn: ActiveConnection, onOpen: () -> Unit, onClose: (
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                val ruleLabel = localizedGroupName(conn.rule)
+                val chainText = conn.chains.take(2).map { localizedGroupName(it) }.joinToString(" · ")
                 Text(
                     buildString {
-                        append(conn.rule)
-                        if (conn.chains.isNotEmpty()) append(" → ")
-                        conn.chains.take(2).forEachIndexed { i, tag ->
-                            if (i > 0) append(" · ")
-                            append(tag)
-                        }
+                        append(ruleLabel)
+                        if (chainText.isNotEmpty()) append(" → ")
+                        append(chainText)
                     },
                     color = colors.textTertiary,
                     fontSize = 12.sp,
@@ -233,7 +237,7 @@ private fun ConnectionDetailSheet(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "连接详情",
+                    stringResource(R.string.conn_detail_title),
                     color = colors.text,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
@@ -247,7 +251,7 @@ private fun ConnectionDetailSheet(
                         .padding(horizontal = 14.dp, vertical = 7.dp),
                 ) {
                     Text(
-                        if (conn.closed) "已断开" else "断开连接",
+                        if (conn.closed) stringResource(R.string.conn_closed) else stringResource(R.string.conn_disconnect),
                         color = if (conn.closed) colors.textTertiary else colors.danger,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
@@ -259,29 +263,40 @@ private fun ConnectionDetailSheet(
             val startedAt = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
                 .format(java.util.Date(conn.createdAt))
             val duration = (System.currentTimeMillis() - conn.createdAt).coerceAtLeast(0) / 1000
-            val durationText = buildString {
-                if (duration >= 3600) append("${duration / 3600}时")
-                if (duration >= 60) append("${duration % 3600 / 60}分")
-                append("${duration % 60}秒")
-            }
+            val hourPart = if (duration >= 3600) stringResource(R.string.conn_duration_hour, duration / 3600) else ""
+            val minutePart = if (duration >= 60) stringResource(R.string.conn_duration_minute, duration % 3600 / 60) else ""
+            val secondPart = stringResource(R.string.conn_duration_second, duration % 60)
+            val durationText = hourPart + minutePart + secondPart
 
             // values are selectable for copy (domain / destination / chains)
             androidx.compose.foundation.text.selection.SelectionContainer {
                 Column {
-                    DetailText("域名", conn.domain)
-                    DetailText("目标", conn.destination)
-                    DetailText("协议", "${conn.network.uppercase()} · ${conn.protocol}")
-                    conn.process?.let { DetailText("进程", it) }
-                    DetailText("匹配规则", conn.rule)
-                    DetailText("链路", conn.chains.joinToString(" → ").ifBlank { "—" })
+                    DetailText(stringResource(R.string.conn_field_domain), conn.domain)
+                    DetailText(stringResource(R.string.conn_field_destination), conn.destination)
+                    DetailText(
+                        stringResource(R.string.conn_field_protocol),
+                        "${conn.network.uppercase()} · ${conn.protocol}",
+                    )
+                    conn.process?.let { DetailText(stringResource(R.string.conn_field_process), it) }
+                    DetailText(stringResource(R.string.conn_field_rule), localizedGroupName(conn.rule))
+                    DetailText(
+                        stringResource(R.string.conn_field_chain),
+                        conn.chains.map { localizedGroupName(it) }.joinToString(" → ").ifBlank { "—" },
+                    )
                 }
             }
-            DetailText("状态", if (conn.closed) "已断开" else "活跃")
             DetailText(
-                "流量",
+                stringResource(R.string.conn_field_status),
+                if (conn.closed) stringResource(R.string.conn_closed) else stringResource(R.string.conn_status_active),
+            )
+            DetailText(
+                stringResource(R.string.conn_field_traffic),
                 "↑ ${Libbox.formatBytes(conn.uplink)}   ↓ ${Libbox.formatBytes(conn.downlink)}",
             )
-            DetailText("建立时间", "$startedAt(已持续 $durationText)")
+            DetailText(
+                stringResource(R.string.conn_field_started),
+                stringResource(R.string.conn_started_at, startedAt, durationText),
+            )
         }
     }
 }

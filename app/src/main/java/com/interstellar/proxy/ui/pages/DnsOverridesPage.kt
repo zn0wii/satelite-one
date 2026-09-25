@@ -29,9 +29,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.interstellar.proxy.R
 import com.interstellar.proxy.data.DnsOverridesStore
 import com.interstellar.proxy.data.model.DnsOverrideEntry
 import com.interstellar.proxy.data.model.isValidIpLiteral
@@ -63,7 +65,7 @@ fun DnsOverridesPage(viewModel: AppViewModel) {
         ) {
             Spacer(Modifier.weight(1f))
             Text(
-                "添加",
+                stringResource(R.string.dns_add),
                 color = colors.accent,
                 fontSize = 17.sp,
                 modifier = Modifier
@@ -79,11 +81,11 @@ fun DnsOverridesPage(viewModel: AppViewModel) {
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            IosSectionLabel("自定义域名解析")
+            IosSectionLabel(stringResource(R.string.dns_title))
             if (entries.isEmpty()) {
                 IosCard(modifier = Modifier.fillMaxWidth()) {
                     Text(
-                        "还没有自定义解析。例如把 example.com 固定到 10.0.0.1，访问时不再走上游 DNS。",
+                        stringResource(R.string.dns_empty_hint),
                         color = colors.textTertiary,
                         fontSize = 14.sp,
                         modifier = Modifier.padding(16.dp),
@@ -104,7 +106,7 @@ fun DnsOverridesPage(viewModel: AppViewModel) {
                 }
             }
             IosSectionFooter(
-                "匹配为精确域名（同系统 hosts），子域名需单独添加，如 example.com 和 www.example.com。修改后立即重新生成配置，内核运行中自动热重载。",
+                stringResource(R.string.dns_footer),
             )
             Spacer(Modifier.height(20.dp))
         }
@@ -148,9 +150,9 @@ private fun DnsOverrideRow(
             .padding(horizontal = 16.dp, vertical = 10.dp),
     ) {
         Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-            Text(entry.displayName(), color = colors.text, fontSize = 17.sp)
+            Text(entry.displayName().ifBlank { stringResource(R.string.dns_unnamed) }, color = colors.text, fontSize = 17.sp)
             Text(
-                "${entry.parsedDomains().size} 个域名  ·  ${entry.ip}",
+                stringResource(R.string.dns_entry_summary, entry.parsedDomains().size, entry.ip),
                 color = colors.textTertiary,
                 fontSize = 13.sp,
             )
@@ -198,35 +200,35 @@ private fun DnsOverrideEditorSheet(
                 .padding(bottom = 28.dp),
         ) {
             Text(
-                if (initial == null) "添加自定义解析" else "编辑自定义解析",
+                if (initial == null) stringResource(R.string.dns_editor_add_title) else stringResource(R.string.dns_editor_edit_title),
                 color = colors.text,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
             )
             Spacer(Modifier.height(16.dp))
 
-            Text("域名", color = colors.textTertiary, fontSize = 13.sp)
+            Text(stringResource(R.string.dns_field_domains), color = colors.textTertiary, fontSize = 13.sp)
             Spacer(Modifier.height(8.dp))
             Field(
                 value = domains,
                 onChange = { domains = it },
-                placeholder = "example.com（多个用逗号分隔）",
+                placeholder = stringResource(R.string.dns_field_domains_hint),
             )
             Spacer(Modifier.height(14.dp))
 
-            Text("IP 地址", color = colors.textTertiary, fontSize = 13.sp)
+            Text(stringResource(R.string.dns_field_ip), color = colors.textTertiary, fontSize = 13.sp)
             Spacer(Modifier.height(8.dp))
             Field(
                 value = ip,
                 onChange = { ip = it },
-                placeholder = "1.2.3.4 或 2400:3200::1",
+                placeholder = stringResource(R.string.dns_field_ip_hint),
             )
 
             Spacer(Modifier.height(8.dp))
             val hint = when {
-                !domainsOk -> "填写至少一个域名"
-                !ipOk -> "IP 需为合法的 IPv4 或 IPv6 地址"
-                else -> "共 ${draft.parsedDomains().size} 个域名将固定解析到 ${draft.ip}"
+                !domainsOk -> stringResource(R.string.dns_hint_no_domains)
+                !ipOk -> stringResource(R.string.dns_hint_bad_ip)
+                else -> stringResource(R.string.dns_hint_summary, draft.parsedDomains().size, draft.ip)
             }
             Text(hint, color = if (domainsOk && !ipOk) colors.warning else colors.textTertiary, fontSize = 12.sp)
 
@@ -240,7 +242,7 @@ private fun DnsOverrideEditorSheet(
                     .padding(vertical = 12.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("保存", color = if (canSave) colors.onPrimary else colors.textTertiary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.dns_save), color = if (canSave) colors.onPrimary else colors.textTertiary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             }
             if (onDelete != null) {
                 Spacer(Modifier.height(8.dp))
@@ -252,7 +254,7 @@ private fun DnsOverrideEditorSheet(
                         .padding(vertical = 12.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("删除解析", color = colors.danger, fontSize = 16.sp)
+                    Text(stringResource(R.string.dns_delete), color = colors.danger, fontSize = 16.sp)
                 }
             }
         }

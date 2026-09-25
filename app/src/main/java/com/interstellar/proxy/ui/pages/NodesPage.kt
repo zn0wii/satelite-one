@@ -46,11 +46,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.interstellar.proxy.R
 import com.interstellar.proxy.data.SubscriptionRepository
 import com.interstellar.proxy.data.Settings
 import com.interstellar.proxy.data.config.ConfigBuilder
@@ -60,6 +62,7 @@ import com.interstellar.proxy.ui.components.PageHeader
 import com.interstellar.proxy.ui.components.SegmentedControl
 import com.interstellar.proxy.ui.components.glassSurface
 import com.interstellar.proxy.ui.components.pressableClick
+import com.interstellar.proxy.ui.localizedGroupName
 import com.interstellar.proxy.ui.theme.LocalInterstellarColors
 
 private data class NodeEntry(
@@ -154,6 +157,8 @@ fun NodesPage(viewModel: AppViewModel) {
     var prevRunning by remember { mutableStateOf(false) }
     var lastMode by remember { mutableStateOf("测速") }
     val testRunning = testing || pingRunning
+    // resolved in composition: computeNodesTestSummary runs outside composable scope
+    val genericFailNote = stringResource(R.string.nodes_test_fail_generic)
     LaunchedEffect(testRunning) {
         if (testRunning) {
             lastMode = if (pingRunning) "Ping" else "测速"
@@ -162,7 +167,7 @@ fun NodesPage(viewModel: AppViewModel) {
             // just finished — snapshot stats over the current pool tags
             val tags = ConfigBuilder.tagsFor(storedNodes)
             val pingReport = if (lastMode == "Ping") viewModel.lastPingReport else null
-            testSummary = computeNodesTestSummary(lastMode, tags, delays, pingReport)
+            testSummary = computeNodesTestSummary(lastMode, tags, delays, pingReport, genericFailNote)
         }
         prevRunning = testRunning
     }
@@ -180,7 +185,7 @@ fun NodesPage(viewModel: AppViewModel) {
             activeSub != null -> activeSub.name
             else -> null
         }
-        PageHeader(kicker = "NODES", title = "节点", titleNote = subNote)
+        PageHeader(kicker = "NODES", title = stringResource(R.string.nodes_title), titleNote = subNote)
 
         val liveItems = remember(currentTab) {
             currentTab?.items ?: emptyList()
@@ -258,11 +263,11 @@ fun NodesPage(viewModel: AppViewModel) {
         if (nodeItems.isEmpty()) {
             EmptyHint(
                 text = if (mixEnabled) {
-                    "Mix 未勾选订阅,或所选订阅中没有可用节点"
+                    stringResource(R.string.nodes_empty_mix)
                 } else if (storedNodes.isEmpty()) {
-                    "请先添加并激活一个订阅"
+                    stringResource(R.string.nodes_empty_no_subscription)
                 } else {
-                    "订阅中没有可用节点"
+                    stringResource(R.string.nodes_empty_no_nodes)
                 },
             )
             return@Column
@@ -275,12 +280,12 @@ fun NodesPage(viewModel: AppViewModel) {
                 .padding(bottom = 10.dp),
         ) {
             Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                Text("分流规则启用", color = colors.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.nodes_split_rules_title), color = colors.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                 Text(
                     when {
-                        !splitRules.hasEnabledRules -> "未设置规则，可在设置里添加"
-                        splitRules.active -> "指定域名走过滤后的节点组"
-                        else -> "已关闭，全部走当前节点"
+                        !splitRules.hasEnabledRules -> stringResource(R.string.nodes_split_rules_no_rules)
+                        splitRules.active -> stringResource(R.string.nodes_split_rules_active)
+                        else -> stringResource(R.string.nodes_split_rules_off)
                     },
                     color = colors.textTertiary,
                     fontSize = 12.sp,
@@ -343,7 +348,10 @@ fun NodesPage(viewModel: AppViewModel) {
             modifier = Modifier.fillMaxWidth(),
         ) {
             SegmentedControl(
-                items = listOf("延迟", "名称"),
+                items = listOf(
+                    stringResource(R.string.nodes_sort_delay),
+                    stringResource(R.string.nodes_sort_name),
+                ),
                 selected = sortMode,
                 onSelect = { sortMode = it },
                 modifier = Modifier.weight(1f),
@@ -359,7 +367,7 @@ fun NodesPage(viewModel: AppViewModel) {
             ) {
                 Icon(
                     imageVector = if (gridView) Icons.Filled.ViewAgenda else Icons.Filled.GridView,
-                    contentDescription = if (gridView) "列表" else "网格",
+                    contentDescription = if (gridView) stringResource(R.string.nodes_view_list) else stringResource(R.string.nodes_view_grid),
                     tint = if (gridView) colors.primary else colors.text,
                     modifier = Modifier.size(18.dp),
                 )
@@ -402,14 +410,14 @@ fun NodesPage(viewModel: AppViewModel) {
                         }
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            "测速中",
+                            stringResource(R.string.nodes_url_testing),
                             color = colors.primary,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
                         )
                     }
                 } else {
-                    Text("测速", color = colors.primary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.nodes_url_test), color = colors.primary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
             Spacer(Modifier.width(8.dp))
@@ -450,7 +458,7 @@ fun NodesPage(viewModel: AppViewModel) {
                         }
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            "Ping中",
+                            stringResource(R.string.nodes_ping_running),
                             color = colors.accent,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
@@ -589,6 +597,7 @@ private fun computeNodesTestSummary(
     tags: List<String>,
     delays: Map<String, Int>,
     pingReport: com.interstellar.proxy.ui.AppViewModel.PingReport? = null,
+    genericFailNote: String,
 ): NodesTestSummary {
     val values = tags.mapNotNull { tag ->
         delays[tag]?.takeIf { it > 0 && it < 65_000 }
@@ -603,7 +612,7 @@ private fun computeNodesTestSummary(
             pingReport.reasons.entries.sortedByDescending { it.value }
                 .joinToString(" · ") { "${it.key} ${it.value}" }
 
-        else -> "超时或握手失败"
+        else -> genericFailNote
     }
     return NodesTestSummary(
         mode = mode,
@@ -629,6 +638,8 @@ private fun TestSummaryBar(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalInterstellarColors.current
+    // lastMode stores the raw functional value ("Ping"/"测速") — localize at display
+    val modeLabel = if (mode == "Ping") "Ping" else stringResource(R.string.nodes_url_test)
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -640,7 +651,7 @@ private fun TestSummaryBar(
         if (running) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "${mode}中",
+                    stringResource(R.string.nodes_mode_running_fmt, modeLabel),
                     color = colors.text,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
@@ -654,7 +665,7 @@ private fun TestSummaryBar(
                 )
                 Spacer(Modifier.weight(1f))
                 Text(
-                    "完成后展示统计",
+                    stringResource(R.string.nodes_summary_pending_hint),
                     color = colors.textTertiary,
                     fontSize = 10.sp,
                 )
@@ -671,26 +682,39 @@ private fun TestSummaryBar(
                 trackColor = colors.primaryMuted,
             )
         } else if (summary != null) {
+            val summaryModeLabel =
+                if (summary.mode == "Ping") "Ping" else stringResource(R.string.nodes_url_test)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "${summary.mode}完成",
+                    stringResource(R.string.nodes_mode_done_fmt, summaryModeLabel),
                     color = colors.primary,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Spacer(Modifier.width(10.dp))
                 Text(
-                    "${summary.total} 节点 · 成功 ${summary.okCount} · 失败 ${summary.failed}",
+                    stringResource(
+                        R.string.nodes_summary_stats_fmt,
+                        summary.total,
+                        summary.okCount,
+                        summary.failed,
+                    ),
                     color = colors.textSecondary,
                     fontSize = 12.sp,
                 )
                 Spacer(Modifier.weight(1f))
-                Text("点按关闭", color = colors.textTertiary, fontSize = 10.sp)
+                Text(stringResource(R.string.nodes_summary_tap_close), color = colors.textTertiary, fontSize = 10.sp)
             }
             if (summary.okCount > 0) {
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "最低 ${summary.minMs}ms · P50 ${summary.p50}ms · P95 ${summary.p95}ms · 最高 ${summary.maxMs}ms",
+                    stringResource(
+                        R.string.nodes_summary_delays_fmt,
+                        summary.minMs,
+                        summary.p50,
+                        summary.p95,
+                        summary.maxMs,
+                    ),
                     color = colors.textTertiary,
                     fontSize = 12.sp,
                     fontFamily = FontFamily.Monospace,
@@ -699,7 +723,7 @@ private fun TestSummaryBar(
             if (summary.skippedUdp > 0) {
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "已跳过 ${summary.skippedUdp} 个 UDP 协议节点 (hysteria2/tuic/wireguard 不支持 TCP Ping, 请用测速)",
+                    stringResource(R.string.nodes_summary_skipped_udp_fmt, summary.skippedUdp),
                     color = colors.warning,
                     fontSize = 11.sp,
                 )
@@ -707,7 +731,7 @@ private fun TestSummaryBar(
             if (summary.failNote != null) {
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "失败原因: ${summary.failNote}",
+                    stringResource(R.string.nodes_summary_fail_reason_fmt, summary.failNote),
                     color = if (summary.okCount == 0) colors.danger else colors.textTertiary,
                     fontSize = 11.sp,
                 )
@@ -756,7 +780,8 @@ private fun NodeRow(
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    item.label,
+                    // group cards carry functional tags — localize for display only
+                    if (isGroupItem(item)) localizedGroupName(item.label) else item.label,
                     color = if (selected) colors.text else colors.textSecondary,
                     fontSize = 14.sp,
                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
@@ -766,8 +791,8 @@ private fun NodeRow(
                 Spacer(Modifier.height(2.dp))
                 Text(
                     when {
-                        isGroupItem(item) && item.type.equals("urltest", true) -> "自动测速分组 ›"
-                        isGroupItem(item) -> "分组 ›"
+                        isGroupItem(item) && item.type.equals("urltest", true) -> stringResource(R.string.nodes_group_urltest_arrow)
+                        isGroupItem(item) -> stringResource(R.string.nodes_group_arrow)
                         item.node != null -> "${item.node.protocolSummary()} · ${item.node.server}:${item.node.port}"
                         else -> ""
                     },
@@ -835,7 +860,8 @@ private fun NodeGridCell(
                 .padding(end = 4.dp, bottom = 40.dp),
         ) {
             Text(
-                item.label,
+                // group cards carry functional tags — localize for display only
+                if (isGroupItem(item)) localizedGroupName(item.label) else item.label,
                 color = if (selected) colors.text else colors.textSecondary,
                 fontSize = 13.sp,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
@@ -862,7 +888,7 @@ private fun NodeGridCell(
         ) {
             when {
                 isGroupItem(item) -> Text(
-                    if (item.type.equals("urltest", true)) "自动测速分组" else "分组",
+                    if (item.type.equals("urltest", true)) stringResource(R.string.nodes_group_urltest) else stringResource(R.string.nodes_group),
                     color = colors.textTertiary,
                     fontSize = 10.sp,
                     maxLines = 1,
@@ -906,17 +932,17 @@ private fun NodeDetailSheet(item: NodeEntry, onDismiss: () -> Unit) {
                 .verticalScroll(rememberScrollState())
                 .padding(bottom = 26.dp),
         ) {
-            Text("节点信息", color = colors.text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.nodes_detail_title), color = colors.text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(14.dp))
-            DetailRow("名称", item.tag)
-            item.source?.let { DetailRow("来源", it) }
-            DetailRow("延迟", when {
-                item.delay > 0 -> "${item.delay} ms"
-                item.testedAt > 0 -> "超时"
-                else -> "未测速"
+            DetailRow(stringResource(R.string.nodes_detail_name), item.tag)
+            item.source?.let { DetailRow(stringResource(R.string.nodes_detail_source), it) }
+            DetailRow(stringResource(R.string.nodes_detail_delay), when {
+                item.delay > 0 -> stringResource(R.string.nodes_delay_ms_fmt, item.delay)
+                item.testedAt > 0 -> stringResource(R.string.nodes_delay_timeout)
+                else -> stringResource(R.string.nodes_delay_untested_full)
             })
             DetailRow(
-                "最近测速",
+                stringResource(R.string.nodes_detail_last_test),
                 if (item.testedAt > 0) {
                     java.text.DateFormat.getDateTimeInstance()
                         .format(java.util.Date(item.testedAt * 1000))
@@ -926,9 +952,9 @@ private fun NodeDetailSheet(item: NodeEntry, onDismiss: () -> Unit) {
             )
 
             item.node?.let { n ->
-                SheetSection("协议")
-                DetailRow("类型", n.type.wire)
-                DetailRow("传输", when (n.network) {
+                SheetSection(stringResource(R.string.nodes_section_protocol))
+                DetailRow(stringResource(R.string.nodes_detail_type), n.type.wire)
+                DetailRow(stringResource(R.string.nodes_detail_network), when (n.network) {
                     "tcp" -> "TCP"
                     "ws" -> "WebSocket"
                     "grpc" -> "gRPC"
@@ -938,48 +964,48 @@ private fun NodeDetailSheet(item: NodeEntry, onDismiss: () -> Unit) {
                     else -> n.network
                 })
                 DetailRow(
-                    "安全",
+                    stringResource(R.string.nodes_detail_security),
                     when {
                         n.reality != null -> "REALITY"
                         n.tls -> "TLS"
-                        else -> "无"
+                        else -> stringResource(R.string.nodes_security_none)
                     },
                 )
-                DetailRow("摘要", n.protocolSummary())
+                DetailRow(stringResource(R.string.nodes_detail_summary), n.protocolSummary())
                 n.flow?.let { DetailRow("Flow", it) }
                 n.sni?.let { DetailRow("SNI", it) }
                 n.alpn?.takeIf { it.isNotEmpty() }?.let { DetailRow("ALPN", it.joinToString(", ")) }
-                n.fingerprint?.let { DetailRow("uTLS 指纹", it) }
-                if (n.insecure == true) DetailRow("允许不安全", "是")
+                n.fingerprint?.let { DetailRow(stringResource(R.string.nodes_detail_utls_fingerprint), it) }
+                if (n.insecure == true) DetailRow(stringResource(R.string.nodes_detail_allow_insecure), stringResource(R.string.nodes_value_yes))
 
-                SheetSection("服务器")
-                DetailRow("地址", n.server)
-                DetailRow("端口", "${n.port}")
-                n.udp?.let { DetailRow("UDP", if (it) "支持" else "不支持") }
-                n.wsPath?.let { DetailRow("WS 路径", it) }
-                n.grpcServiceName?.let { DetailRow("gRPC 服务名", it) }
+                SheetSection(stringResource(R.string.nodes_section_server))
+                DetailRow(stringResource(R.string.nodes_detail_address), n.server)
+                DetailRow(stringResource(R.string.nodes_detail_port), "${n.port}")
+                n.udp?.let { DetailRow("UDP", if (it) stringResource(R.string.nodes_value_supported) else stringResource(R.string.nodes_value_unsupported)) }
+                n.wsPath?.let { DetailRow(stringResource(R.string.nodes_detail_ws_path), it) }
+                n.grpcServiceName?.let { DetailRow(stringResource(R.string.nodes_detail_grpc_service), it) }
                 n.httpHost?.takeIf { it.isNotEmpty() }?.let { DetailRow("HTTP Host", it.joinToString(", ")) }
-                n.httpPath?.let { DetailRow("HTTP 路径", it) }
+                n.httpPath?.let { DetailRow(stringResource(R.string.nodes_detail_http_path), it) }
                 n.headers?.takeIf { it.isNotEmpty() }?.let {
-                    DetailRow("额外 Header", it.entries.joinToString(" · ") { (k, v) -> "$k=$v" })
+                    DetailRow(stringResource(R.string.nodes_detail_extra_headers), it.entries.joinToString(" · ") { (k, v) -> "$k=$v" })
                 }
 
                 // 协议特定参数
                 val params = buildList {
-                    n.method?.let { add("加密" to it) }
+                    n.method?.let { add(stringResource(R.string.nodes_param_cipher) to it) }
                     n.alterId?.let { add("alterId" to "$it") }
-                    n.security?.let { add("VMess 加密" to it) }
+                    n.security?.let { add(stringResource(R.string.nodes_param_vmess_cipher) to it) }
                     if (n.type == com.interstellar.proxy.data.model.NodeType.HYSTERIA2 && !n.hy2ObfsPassword.isNullOrBlank()) {
-                        add("混淆" to "已启用")
+                        add(stringResource(R.string.nodes_param_obfs) to stringResource(R.string.nodes_value_enabled))
                     }
-                    n.upMbps?.let { add("上行" to "$it Mbps") }
-                    n.downMbps?.let { add("下行" to "$it Mbps") }
-                    n.congestionControl?.let { add("拥塞控制" to it) }
-                    n.udpRelayMode?.let { add("UDP 中继" to it) }
+                    n.upMbps?.let { add(stringResource(R.string.nodes_param_up) to "$it Mbps") }
+                    n.downMbps?.let { add(stringResource(R.string.nodes_param_down) to "$it Mbps") }
+                    n.congestionControl?.let { add(stringResource(R.string.nodes_param_cc) to it) }
+                    n.udpRelayMode?.let { add(stringResource(R.string.nodes_param_udp_relay) to it) }
                     n.shadowTls?.let { add("Shadow-TLS" to "v${it.version}") }
                     n.plugin?.let { p ->
                         add(
-                            "插件" to buildString {
+                            stringResource(R.string.nodes_param_plugin) to buildString {
                                 append(p)
                                 n.pluginOpts?.takeIf { it.isNotEmpty() }?.let { opts ->
                                     append(" (")
@@ -990,34 +1016,34 @@ private fun NodeDetailSheet(item: NodeEntry, onDismiss: () -> Unit) {
                         )
                     }
                     n.wireguard?.let { wg ->
-                        add("WireGuard" to "${wg.localAddress.size} 个本地地址 · MTU ${wg.mtu ?: 1420}")
+                        add("WireGuard" to stringResource(R.string.nodes_param_wireguard_fmt, wg.localAddress.size, wg.mtu ?: 1420))
                     }
                 }
                 if (params.isNotEmpty()) {
-                    SheetSection("参数")
+                    SheetSection(stringResource(R.string.nodes_section_params))
                     params.forEach { (k, v) -> DetailRow(k, v) }
                 }
 
-                SheetSection("凭据")
+                SheetSection(stringResource(R.string.nodes_section_credentials))
                 n.uuid?.let { DetailRow("UUID", it) }
-                n.password?.let { DetailRow("密码", it) }
-                n.username?.let { DetailRow("用户名", it) }
-                n.sshUser?.let { DetailRow("SSH 用户", it) }
-                n.sshKey?.let { DetailRow("SSH 私钥", it) }
-                n.hy2ObfsPassword?.let { DetailRow("混淆密码", it) }
+                n.password?.let { DetailRow(stringResource(R.string.nodes_detail_password), it) }
+                n.username?.let { DetailRow(stringResource(R.string.nodes_detail_username), it) }
+                n.sshUser?.let { DetailRow(stringResource(R.string.nodes_detail_ssh_user), it) }
+                n.sshKey?.let { DetailRow(stringResource(R.string.nodes_detail_ssh_key), it) }
+                n.hy2ObfsPassword?.let { DetailRow(stringResource(R.string.nodes_detail_obfs_password), it) }
                 n.reality?.let { reality ->
-                    DetailRow("REALITY 公钥", reality.publicKey)
+                    DetailRow(stringResource(R.string.nodes_detail_reality_pubkey), reality.publicKey)
                     reality.shortId?.let { DetailRow("REALITY shortId", it) }
                 }
                 n.wireguard?.let { wg ->
-                    DetailRow("WG 私钥", wg.privateKey)
-                    wg.peerPublicKey?.let { DetailRow("WG 对端公钥", it) }
+                    DetailRow(stringResource(R.string.nodes_detail_wg_privkey), wg.privateKey)
+                    wg.peerPublicKey?.let { DetailRow(stringResource(R.string.nodes_detail_wg_peer_pubkey), it) }
                     wg.preSharedKey?.let { DetailRow("PSK", it) }
                 }
                 if (n.uuid == null && n.password == null && n.sshUser == null && n.username == null &&
                     n.sshKey == null && n.hy2ObfsPassword == null && n.reality == null && n.wireguard == null
                 ) {
-                    DetailRow("—", "此协议无凭据字段")
+                    DetailRow("—", stringResource(R.string.nodes_detail_no_credentials))
                 }
             }
         }
@@ -1063,13 +1089,15 @@ private fun DetailRow(label: String, value: String) {
 @Composable
 fun DelayBadge(delay: Int, modifier: Modifier = Modifier, tested: Boolean = false) {
     val colors = LocalInterstellarColors.current
+    val timeoutLabel = stringResource(R.string.nodes_delay_timeout)
+    val untestedLabel = stringResource(R.string.nodes_delay_untested)
     val (text, color) = when {
         // stamped but no delay → the test ran and the node failed/timed out
-        delay <= 0 -> if (tested) "超时" to colors.danger else "未测" to colors.textTertiary
-        delay >= 65000 -> "超时" to colors.danger
-        delay < 200 -> "${delay}ms" to colors.success
-        delay < 300 -> "${delay}ms" to colors.warning
-        else -> "${delay}ms" to colors.danger
+        delay <= 0 -> if (tested) timeoutLabel to colors.danger else untestedLabel to colors.textTertiary
+        delay >= 65000 -> timeoutLabel to colors.danger
+        delay < 200 -> stringResource(R.string.nodes_delay_ms_badge_fmt, delay) to colors.success
+        delay < 300 -> stringResource(R.string.nodes_delay_ms_badge_fmt, delay) to colors.warning
+        else -> stringResource(R.string.nodes_delay_ms_badge_fmt, delay) to colors.danger
     }
     Box(
         modifier = modifier
@@ -1128,7 +1156,8 @@ private fun GroupTabRow(
                     .padding(horizontal = 14.dp, vertical = 7.dp),
             ) {
                 Text(
-                    tab.tag,
+                    // functional group tag — localize for display only
+                    localizedGroupName(tab.tag),
                     color = if (selected) colors.primary else colors.textSecondary,
                     fontSize = 13.sp,
                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,

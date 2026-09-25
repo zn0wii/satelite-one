@@ -4,12 +4,17 @@ import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import com.interstellar.proxy.data.ConfigStore
 import com.interstellar.proxy.data.Settings
+import com.interstellar.proxy.ktx.wrapAppLocale
 
 /**
  * Quick-settings tile: one-tap VPN toggle.
  * Tracks last-known state via Settings so the tile icon stays truthful.
  */
 class QuickTileService : TileService() {
+
+    override fun attachBaseContext(base: android.content.Context?) {
+        super.attachBaseContext(base?.wrapAppLocale())
+    }
 
     override fun onStartListening() {
         super.onStartListening()
@@ -52,7 +57,7 @@ class QuickTileService : TileService() {
         val tile = qsTile ?: return
         val active = Settings.tileActive
         tile.state = if (active) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
-        tile.subtitle = if (active) "已连接" else "已离线"
+        tile.subtitle = getString(if (active) com.interstellar.proxy.R.string.status_started else com.interstellar.proxy.R.string.tile_disconnected)
         tile.updateTile()
     }
 

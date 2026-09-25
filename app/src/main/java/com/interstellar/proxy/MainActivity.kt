@@ -61,12 +61,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
+import com.interstellar.proxy.R
+import com.interstellar.proxy.ktx.wrapAppLocale
 import com.interstellar.proxy.data.Settings
 import com.interstellar.proxy.ui.AppViewModel
 import com.interstellar.proxy.ui.ConnectionsViewModel
@@ -77,6 +80,7 @@ import com.interstellar.proxy.ui.pages.LogsPage
 import com.interstellar.proxy.ui.pages.PerAppProxyPage
 import com.interstellar.proxy.ui.pages.SettingsPage
 import com.interstellar.proxy.ui.pages.SettingsSubPage
+import com.interstellar.proxy.ui.pages.setLanguageChangedListener
 import com.interstellar.proxy.ui.pages.setThemeChangedListener
 import com.interstellar.proxy.ui.components.AmbientGlow
 import com.interstellar.proxy.ui.components.DockItem
@@ -90,6 +94,10 @@ import com.interstellar.proxy.ui.theme.InterstellarTheme
 class MainActivity : ComponentActivity() {
 
     private var pendingStart: (() -> Unit)? = null
+
+    override fun attachBaseContext(newBase: android.content.Context) {
+        super.attachBaseContext(newBase.wrapAppLocale())
+    }
 
     private val vpnPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -106,25 +114,38 @@ class MainActivity : ComponentActivity() {
         setContent {
             var themeVersion by remember { mutableIntStateOf(0) }
             setThemeChangedListener { themeVersion++ }
+            // language switches swap LocalContext (localized resources) under
+            // the whole tree in place — no activity recreate, no window flash
+            var languageVersion by remember { mutableIntStateOf(0) }
+            setLanguageChangedListener { languageVersion++ }
+            val localeContext = remember(languageVersion) {
+                com.interstellar.proxy.ktx.AppLanguage.pinnedTag(this)?.let {
+                    com.interstellar.proxy.ktx.LocaleContextWrapper(this)
+                } ?: (this as android.content.Context)
+            }
             // nav lives OUTSIDE the theme key so theme switches never reset
             // the current tab / sub-page
             var nav by remember { mutableStateOf(NavState()) }
-            androidx.compose.runtime.key(themeVersion) {
-                InterstellarTheme(themeMode = Settings.themeMode, accentId = Accents.selectedId) {
-                    AppRoot(
-                        nav = nav,
-                        onNavChange = { nav = it },
-                        requestVpnThenStart = { onReady ->
-                            val prepare = VpnService.prepare(this)
-                            android.util.Log.d("InterstellarUI", "vpn prepare=" + (prepare != null))
-                            if (prepare != null) {
-                                pendingStart = onReady
-                                vpnPermissionLauncher.launch(prepare)
-                            } else {
-                                onReady()
-                            }
-                        },
-                    )
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.compose.ui.platform.LocalContext provides localeContext,
+            ) {
+                androidx.compose.runtime.key(themeVersion) {
+                    InterstellarTheme(themeMode = Settings.themeMode, accentId = Accents.selectedId) {
+                        AppRoot(
+                            nav = nav,
+                            onNavChange = { nav = it },
+                            requestVpnThenStart = { onReady ->
+                                val prepare = VpnService.prepare(this)
+                                android.util.Log.d("InterstellarUI", "vpn prepare=" + (prepare != null))
+                                if (prepare != null) {
+                                    pendingStart = onReady
+                                    vpnPermissionLauncher.launch(prepare)
+                                } else {
+                                    onReady()
+                                }
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -289,11 +310,11 @@ fun AppRoot(
                             }
                             GlassDock(
                                 items = listOf(
-                                    DockItem("首页", Icons.Outlined.Home, Icons.Filled.Home),
-                                    DockItem("节点", Icons.Outlined.Hub, Icons.Filled.Hub),
-                                    DockItem("订阅", Icons.Outlined.Subscriptions, Icons.Filled.Subscriptions),
-                                    DockItem("日志", Icons.Outlined.Description, Icons.Filled.Description),
-                                    DockItem("设置", Icons.Outlined.Settings, Icons.Filled.Settings),
+                                    DockItem(stringResource(R.string.main_tab_home), Icons.Outlined.Home, Icons.Filled.Home),
+                                    DockItem(stringResource(R.string.main_tab_nodes), Icons.Outlined.Hub, Icons.Filled.Hub),
+                                    DockItem(stringResource(R.string.main_tab_subs), Icons.Outlined.Subscriptions, Icons.Filled.Subscriptions),
+                                    DockItem(stringResource(R.string.main_tab_logs), Icons.Outlined.Description, Icons.Filled.Description),
+                                    DockItem(stringResource(R.string.main_tab_settings), Icons.Outlined.Settings, Icons.Filled.Settings),
                                 ),
                                 selected = pagerState.currentPage,
                                 onSelect = { i -> jumpTo(tabs[i]) },
@@ -333,7 +354,7 @@ private fun SubPageContainer(
         ) {
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "返回",
+                contentDescription = stringResource(R.string.main_back),
                 tint = colors.accent,
                 modifier = Modifier
                     .align(Alignment.CenterStart)

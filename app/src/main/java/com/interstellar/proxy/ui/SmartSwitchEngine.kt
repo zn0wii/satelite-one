@@ -53,15 +53,37 @@ class SmartSwitchEngine(
 ) {
     data class SmartState(
         val active: Boolean = false,
-        val phase: String = "空闲",
+        val phase: SmartPhase = SmartPhase.Idle,
         val currentDelayMs: Int = 0,
         /** The node smart mode currently rides on (what the card should show). */
         val currentTag: String? = null,
         val candidateCount: Int = 0,
         val lastSwitchTo: String? = null,
         val lastSwitchAt: Long = 0,
-        val alert: String? = null,
+        val alert: SmartAlert? = null,
     )
+
+    /** Engine phase — UI-localized via LocalizedNames.smartPhaseText. */
+    sealed interface SmartPhase {
+        data object Idle : SmartPhase
+        data object Patrolling : SmartPhase
+        data class PatrolError(val brief: String) : SmartPhase
+        data class Healthy(val delayMs: Int) : SmartPhase
+        data object PingScan : SmartPhase
+        data object RealTest : SmartPhase
+        data object Cooldown : SmartPhase
+        data class Switched(val delayMs: Int) : SmartPhase
+        data class Keep(val delayMs: Int) : SmartPhase
+        data object Failed : SmartPhase
+    }
+
+    /** Guard-rail outcome surfaced on the dashboard status line. */
+    sealed interface SmartAlert {
+        data object NoPool : SmartAlert
+        data object NoCandidates : SmartAlert
+        data object NoQualified : SmartAlert
+        data class RoundTooLong(val seconds: Int) : SmartAlert
+    }
 
     companion object {
         private const val PATROL_INTERVAL_MS = 30_000L
@@ -120,7 +142,7 @@ class SmartSwitchEngine(
                     throw e
                 } catch (e: Exception) {
                     AppLog.log("smart", "巡检循环异常: ${e.message?.take(48) ?: e.javaClass.simpleName}")
-                    state = state.copy(phase = "巡检异常: ${e.message?.take(24)}")
+                    state = state.copy(phase = SmartPhase.PatrolError(e.message?.take(24) ?: e.javaClass.simpleName))
                 }
                 delay(PATROL_INTERVAL_MS)
             }
@@ -131,23 +153,23 @@ class SmartSwitchEngine(
         if (!started) return
         started = false
         AppLog.log("smart", "引擎已停止")
-        state = state.copy(active = false, phase = "空闲")
+        state = state.copy(active = false, phase = SmartPhase.Idle)
     }
 
     // ---- patrol ----
 
     private suspend fun patrolOnce() {
         if (!isActive()) {
-            if (state.active) state = state.copy(active = false, phase = "空闲")
+            if (state.active) state = state.copy(active = false, phase = SmartPhase.Idle)
             return
         }
-        state = state.copy(active = true, phase = "巡检中", currentTag = currentTag())
+        state = state.copy(active = true, phase = SmartPhase.Patrolling, currentTag = currentTag())
         val tag = currentTag()
         val real = probeExit()
         state = state.copy(currentDelayMs = real)
         if (tag != null && real in 1..GOOD_MS) {
             record(tag, real)
-            state = state.copy(phase = "正常 ${real}ms")
+            state = state.copy(phase = SmartPhase.Healthy(real))
             AppLog.log("smart", "巡检正常: $tag · ${real}ms")
             return
         }
@@ -166,13 +188,13 @@ class SmartSwitchEngine(
         val roundStart = System.currentTimeMillis()
         val nodes = pool()
         if (nodes.isEmpty()) {
-            state = state.copy(alert = "无可用节点池")
+            state = state.copy(alert = SmartAlert.NoPool)
             AppLog.log("smart", "筛选中止: 无可用节点池")
             return
         }
         val tags = com.interstellar.proxy.data.config.ConfigBuilder.tagsFor(nodes)
 
-        state = state.copy(phase = "Ping 扫描")
+        state = state.copy(phase = SmartPhase.PingScan)
         val pings = pingPool(nodes, tags)
         val byTag = tags.zip(pings).toMap()
         val candidates = tags.filter { tag ->
@@ -188,7 +210,7 @@ class SmartSwitchEngine(
         val ordered = candidates.sortedBy { tag -> cache[tag]?.first ?: Int.MAX_VALUE }
         state = state.copy(candidateCount = candidates.size)
         if (candidates.isEmpty()) {
-            state = state.copy(alert = "无低延迟备选")
+            state = state.copy(alert = SmartAlert.NoCandidates)
             AppLog.log("smart", "筛选中止: Ping 后无低延迟备选节点 (链路质量差?)")
             return
         }
@@ -196,7 +218,7 @@ class SmartSwitchEngine(
             AppLog.log("smart", "备选节点过少: 仅 ${candidates.size} 个")
         }
 
-        state = state.copy(phase = "实测筛选")
+        state = state.copy(phase = SmartPhase.RealTest)
         var chosen: Pair<String, Int>? = null
         val kernelDelays = requestKernelDelays?.invoke()
         if (kernelDelays != null) {
@@ -233,7 +255,7 @@ class SmartSwitchEngine(
         val elapsed = System.currentTimeMillis() - roundStart
         when {
             chosen == null -> {
-                state = state.copy(alert = "未找到延迟达标节点", phase = "筛选失败")
+                state = state.copy(alert = SmartAlert.NoQualified, phase = SmartPhase.Failed)
                 AppLog.log("smart", "本轮筛选结束: 未找到延迟 <${REAL_MAX_MS}ms 的节点 (耗时 ${elapsed / 1000}s)")
             }
 
@@ -244,14 +266,14 @@ class SmartSwitchEngine(
                     if (System.currentTimeMillis() - state.lastSwitchAt < SWITCH_COOLDOWN_MS &&
                         !currentDead
                     ) {
-                        state = state.copy(phase = "冷却中")
+                        state = state.copy(phase = SmartPhase.Cooldown)
                         AppLog.log("smart", "冷却中 (距上次切换不足 ${SWITCH_COOLDOWN_MS / 1000}s), 暂不切换 → $tag (${delay}ms)")
                         return
                     }
                     if (applySwitch(tag)) {
                         record(tag, delay)
                         state = state.copy(
-                            phase = "已切换 ${delay}ms",
+                            phase = SmartPhase.Switched(delay),
                             currentTag = tag,
                             lastSwitchTo = tag,
                             lastSwitchAt = System.currentTimeMillis(),
@@ -263,13 +285,13 @@ class SmartSwitchEngine(
                     }
                 } else {
                     record(tag, delay)
-                    state = state.copy(phase = "保持 ${delay}ms")
+                    state = state.copy(phase = SmartPhase.Keep(delay))
                     AppLog.log("smart", "保持当前节点: $tag (${delay}ms)")
                 }
             }
         }
         if (elapsed > ROUND_TOO_LONG_MS) {
-            state = state.copy(alert = "筛选耗时 ${elapsed / 1000}s")
+            state = state.copy(alert = SmartAlert.RoundTooLong((elapsed / 1000).toInt()))
             AppLog.log("smart", "本轮筛选耗时过长 (${elapsed / 1000}s)")
         }
         saveCache()

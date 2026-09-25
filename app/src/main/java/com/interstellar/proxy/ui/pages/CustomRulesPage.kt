@@ -33,10 +33,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.interstellar.proxy.R
 import com.interstellar.proxy.data.SimpleRouteRule
 import com.interstellar.proxy.ui.AppViewModel
 import com.interstellar.proxy.ui.components.GlassCard
@@ -49,6 +51,7 @@ import com.interstellar.proxy.ui.components.IosSectionLabel
 import com.interstellar.proxy.ui.components.IosSwitch
 import com.interstellar.proxy.ui.components.SegmentedControl
 import com.interstellar.proxy.ui.components.pressableClick
+import com.interstellar.proxy.ui.localizedLabel
 import com.interstellar.proxy.ui.theme.LocalInterstellarColors
 
 /**
@@ -87,10 +90,10 @@ fun CustomRulesPage(viewModel: AppViewModel) {
             modifier = Modifier.fillMaxWidth(),
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                IosSectionLabel("分流规则")
+                IosSectionLabel(stringResource(R.string.rules_title))
             }
             GlassButton(
-                text = "添加",
+                text = stringResource(R.string.rules_add),
                 style = GlassButtonStyle.Primary,
                 onClick = {
                     editing = null
@@ -109,7 +112,7 @@ fun CustomRulesPage(viewModel: AppViewModel) {
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    "暂无规则 · 点「添加」创建\n例如 bilibili.com → 直连",
+                    stringResource(R.string.rules_empty_hint),
                     color = colors.textTertiary,
                     fontSize = 13.sp,
                     lineHeight = 20.sp,
@@ -133,7 +136,7 @@ fun CustomRulesPage(viewModel: AppViewModel) {
             }
         }
 
-        IosSectionFooter("后缀匹配:填写 example.com 覆盖其全部子域名;规则先于内置规则生效。")
+        IosSectionFooter(stringResource(R.string.rules_footer))
         Spacer(Modifier.height(16.dp))
     }
 }
@@ -163,7 +166,7 @@ private fun SimpleRuleRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                rule.action.label,
+                rule.action.localizedLabel(),
                 color = when (rule.action) {
                     SimpleRouteRule.Action.DIRECT -> colors.success
                     SimpleRouteRule.Action.PROXY -> colors.textSecondary
@@ -221,7 +224,7 @@ private fun RuleEditorSheet(
                     .verticalScroll(rememberScrollState())
                     .imePadding(),
             ) {
-                IosSectionLabel(if (initial == null) "添加规则" else "编辑规则")
+                IosSectionLabel(if (initial == null) stringResource(R.string.rules_editor_add_title) else stringResource(R.string.rules_editor_edit_title))
                 Spacer(Modifier.height(12.dp))
 
                 OutlinedTextField(
@@ -243,7 +246,7 @@ private fun RuleEditorSheet(
                 Spacer(Modifier.height(14.dp))
 
                 SegmentedControl(
-                    items = actions.map { it.label },
+                    items = actions.map { it.localizedLabel() },
                     selected = actionIndex,
                     onSelect = { actionIndex = it },
                     modifier = Modifier.fillMaxWidth(),
@@ -253,9 +256,9 @@ private fun RuleEditorSheet(
                 if (actions[actionIndex] == SimpleRouteRule.Action.NODE) {
                     Spacer(Modifier.height(10.dp))
                     if (nodes.isEmpty()) {
-                        Text("当前节点池为空", color = colors.textTertiary, fontSize = 12.sp)
+                        Text(stringResource(R.string.rules_no_nodes), color = colors.textTertiary, fontSize = 12.sp)
                     } else {
-                        Text("选择节点", color = colors.textTertiary, fontSize = 11.sp)
+                        Text(stringResource(R.string.rules_select_node), color = colors.textTertiary, fontSize = 11.sp)
                         Spacer(Modifier.height(4.dp))
                         LazyColumn(modifier = Modifier.height(200.dp)) {
                             items(nodes, key = { it.first }) { (id, tag, _) ->
@@ -292,13 +295,13 @@ private fun RuleEditorSheet(
 
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     GlassButton(
-                        text = "取消",
+                        text = stringResource(R.string.rules_cancel),
                         style = GlassButtonStyle.Secondary,
                         onClick = onDismiss,
                         modifier = Modifier.weight(1f),
                     )
                     GlassButton(
-                        text = "保存",
+                        text = stringResource(R.string.rules_save),
                         style = GlassButtonStyle.Primary,
                         enabled = domain.isNotBlank() &&
                             (actions[actionIndex] != SimpleRouteRule.Action.NODE || nodeId.isNotBlank()),

@@ -2,12 +2,17 @@ package com.interstellar.proxy.bg
 
 import android.app.Service
 import android.content.Intent
+import com.interstellar.proxy.ktx.wrapAppLocale
 import io.nekohasekai.libbox.Notification
 
 class ProxyService :
     Service(),
     PlatformInterfaceWrapper {
     private val service = BoxService(this, this)
+
+    override fun attachBaseContext(base: android.content.Context?) {
+        super.attachBaseContext(base?.wrapAppLocale())
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int) = service.onStartCommand()
 

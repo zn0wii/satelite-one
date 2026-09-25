@@ -19,6 +19,13 @@ import java.util.UUID
 object SubscriptionRepository {
     private const val TAG = "SubscriptionRepo"
 
+    /** Localized string following the CURRENT language (live, no restart needed). */
+    private fun str(id: Int): String =
+        com.interstellar.proxy.ktx.AppLanguage.getString(InterstellarApplication.application, id)
+
+    private fun str(id: Int, vararg formatArgs: Any): String =
+        com.interstellar.proxy.ktx.AppLanguage.getString(InterstellarApplication.application, id, *formatArgs)
+
     private val json = Json {
         ignoreUnknownKeys = true
         prettyPrint = true
@@ -196,16 +203,16 @@ object SubscriptionRepository {
 
         val mix = Settings.mixEnabled
         if (!mix && activeSubscription() == null) {
-            lastConfigError = "未选择订阅"
+            lastConfigError = str(com.interstellar.proxy.R.string.repo_no_subscription_selected)
             return null
         }
 
         val nodes = activeNodes()
         if (nodes.isEmpty()) {
             lastConfigError = when {
-                mix && mixedSubscriptions().isEmpty() -> "Mix 未勾选订阅"
-                mix -> "所选订阅中没有可用节点"
-                else -> "订阅中没有可用节点"
+                mix && mixedSubscriptions().isEmpty() -> str(com.interstellar.proxy.R.string.repo_mix_none_checked)
+                mix -> str(com.interstellar.proxy.R.string.repo_selected_no_nodes)
+                else -> str(com.interstellar.proxy.R.string.repo_no_nodes)
             }
             return null
         }
@@ -262,7 +269,7 @@ object SubscriptionRepository {
             lastConfigError = null
             content
         } catch (e: Exception) {
-            lastConfigError = "配置校验失败: ${e.message}"
+            lastConfigError = str(com.interstellar.proxy.R.string.repo_config_check_failed, e.message ?: "")
             android.util.Log.e(TAG, "config check failed: ${e.message}\n$content", e)
             null
         }
@@ -314,7 +321,7 @@ object SubscriptionRepository {
             lastConfigError = null
             content
         } catch (e: Exception) {
-            lastConfigError = "原始配置校验失败:${e.message}"
+            lastConfigError = str(com.interstellar.proxy.R.string.repo_raw_check_failed, e.message ?: "")
             android.util.Log.e(TAG, "raw config check failed: ${e.message}\n$content", e)
             null
         }
@@ -326,7 +333,7 @@ object SubscriptionRepository {
      */
     suspend fun refresh(id: String): String? = withContext(Dispatchers.IO) {
         val sub = get(id) ?: return@withContext null
-        val url = sub.url ?: return@withContext "本地订阅不支持刷新"
+        val url = sub.url ?: return@withContext str(com.interstellar.proxy.R.string.vm_local_no_refresh)
         try {
             val result = com.interstellar.proxy.data.net.SubscriptionFetcher.fetch(url)
             val format = saveRawBody(id, result.body)
@@ -343,7 +350,7 @@ object SubscriptionRepository {
                             lastUpdated = System.currentTimeMillis(),
                         ),
                     )
-                    "已刷新 ${sub.name}:${parsed.nodes.size} 个节点"
+                    str(com.interstellar.proxy.R.string.repo_refreshed, sub.name, parsed.nodes.size)
                 }
 
                 com.interstellar.proxy.data.subscription.SubscriptionParser.Result.Empty ->
@@ -351,13 +358,17 @@ object SubscriptionRepository {
                     // body is retained and usable in raw mode with a matching core
                     if (format != null) {
                         upsert(sub.copy(configFormat = format, lastUpdated = System.currentTimeMillis()))
-                        "已刷新 ${sub.name}:${com.interstellar.proxy.data.subscription.RawConfigFormat.from(format)?.label} 配置已保留"
+                        str(
+                            com.interstellar.proxy.R.string.repo_refreshed_raw,
+                            sub.name,
+                            com.interstellar.proxy.data.subscription.RawConfigFormat.from(format)?.label ?: "",
+                        )
                     } else {
-                        "刷新后内容无法解析:${sub.name}"
+                        str(com.interstellar.proxy.R.string.repo_refresh_unparsable, sub.name)
                     }
             }
         } catch (e: Exception) {
-            "刷新失败 ${sub.name}:${e.message}"
+            str(com.interstellar.proxy.R.string.repo_refresh_failed, sub.name, e.message ?: "")
         }
     }
 

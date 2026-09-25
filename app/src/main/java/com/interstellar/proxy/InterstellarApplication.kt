@@ -11,6 +11,7 @@ import androidx.core.content.getSystemService
 import io.nekohasekai.libbox.Libbox
 import io.nekohasekai.libbox.SetupOptions
 import com.interstellar.proxy.data.RulesStore
+import com.interstellar.proxy.ktx.wrapAppLocale
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
@@ -19,7 +20,9 @@ import java.util.Locale
 
 class InterstellarApplication : Application() {
     override fun attachBaseContext(base: Context?) {
-        super.attachBaseContext(base)
+        // wrap BEFORE super so every getString on the application context is
+        // localized; AppLanguage reads settings.properties off `base` itself
+        super.attachBaseContext(base?.wrapAppLocale())
         application = this
     }
 
@@ -29,6 +32,14 @@ class InterstellarApplication : Application() {
         // hev JNI bridge must register on a thread WITH a classloader (main);
         // a first touch from a coroutine IO thread aborts the whole VM
         runCatching { com.interstellar.proxy.core.TProxyService.preload() }
+
+        // pinned language also drives JVM-default formatting / libbox messages
+        val pinnedTag = com.interstellar.proxy.data.Settings.appLanguage
+            .takeIf { it != com.interstellar.proxy.ktx.AppLanguage.SYSTEM }
+        if (pinnedTag != null) {
+            // NB: android's java.util.Locale only has the singular forLanguageTag
+            runCatching { Locale.setDefault(Locale.forLanguageTag(pinnedTag)) }
+        }
 
         runCatching {
             Libbox.setLocale(Locale.getDefault().toLanguageTag())

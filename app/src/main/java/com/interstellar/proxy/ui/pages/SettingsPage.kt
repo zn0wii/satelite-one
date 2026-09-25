@@ -33,9 +33,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.interstellar.proxy.BuildConfig
+import com.interstellar.proxy.R
 import com.interstellar.proxy.data.CustomRulesStore
 import com.interstellar.proxy.data.DnsOverridesStore
 import com.interstellar.proxy.data.Settings
@@ -57,20 +59,28 @@ fun setThemeChangedListener(listener: () -> Unit) {
     onThemeChanged = listener
 }
 
+private var onLanguageChanged: (() -> Unit)? = null
+
+/** Registered by MainActivity: swaps LocalContext (localized resources) in place. */
+fun setLanguageChangedListener(listener: () -> Unit) {
+    onLanguageChanged = listener
+}
+
 enum class SettingsSubPage { Settings, PerApp, Connections, Logs, Rules, Dns, Proxy }
 
 /** Bottom-dock root tabs (satelite's navbar, phone layout). */
 enum class MainTab { Home, Nodes, Subscriptions, Logs, Settings }
 
 /** hiddify-style: phone uses 2 tabs (Home/Settings); these pages push in. */
+@Composable
 fun settingsSubPageTitle(page: SettingsSubPage): String = when (page) {
-    SettingsSubPage.Settings -> "设置"
-    SettingsSubPage.PerApp -> "分应用代理"
-    SettingsSubPage.Connections -> "监控"
-    SettingsSubPage.Logs -> "系统日志"
-    SettingsSubPage.Rules -> "路由规则"
-    SettingsSubPage.Dns -> "DNS 解析"
-    SettingsSubPage.Proxy -> "路由设置"
+    SettingsSubPage.Settings -> stringResource(R.string.settings_title)
+    SettingsSubPage.PerApp -> stringResource(R.string.settings_subpage_per_app)
+    SettingsSubPage.Connections -> stringResource(R.string.settings_subpage_connections)
+    SettingsSubPage.Logs -> stringResource(R.string.settings_subpage_logs)
+    SettingsSubPage.Rules -> stringResource(R.string.settings_subpage_rules)
+    SettingsSubPage.Dns -> stringResource(R.string.settings_subpage_dns)
+    SettingsSubPage.Proxy -> stringResource(R.string.settings_subpage_proxy)
 }
 
 private fun isIgnoringBatteryOptimizations(context: android.content.Context): Boolean =
@@ -100,16 +110,20 @@ fun SettingsPage(onOpen: (SettingsSubPage) -> Unit, onProxyChanged: () -> Unit =
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp),
     ) {
-        PageHeader(kicker = "PREFERENCES", title = "设置")
+        PageHeader(kicker = "PREFERENCES", title = stringResource(R.string.settings_title))
 
         // ---- 外观 ----
-        PrefSectionLabel("外观")
+        PrefSectionLabel(stringResource(R.string.settings_section_appearance))
         GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = 6.dp) {
             var heroStyle by remember { mutableStateOf(Settings.heroStyle) }
             PrefSegRow(
-                title = "主题",
-                desc = "深浅色跟随系统或锁定",
-                items = listOf("跟随系统", "浅色", "深色"),
+                title = stringResource(R.string.settings_theme_title),
+                desc = stringResource(R.string.settings_theme_desc),
+                items = listOf(
+                    stringResource(R.string.settings_theme_system),
+                    stringResource(R.string.settings_theme_light),
+                    stringResource(R.string.settings_theme_dark),
+                ),
                 selected = listOf("system", "light", "dark").indexOf(normalizedTheme()),
                 layout = SegLayout.Below,
                 onSelect = { index ->
@@ -120,9 +134,12 @@ fun SettingsPage(onOpen: (SettingsSubPage) -> Unit, onProxyChanged: () -> Unit =
                 },
             )
             PrefSegRow(
-                title = "主视觉",
-                desc = "首页连接图标的样式",
-                items = listOf("笑脸", "轨道"),
+                title = stringResource(R.string.settings_hero_style_title),
+                desc = stringResource(R.string.settings_hero_style_desc),
+                items = listOf(
+                    stringResource(R.string.settings_hero_smiley),
+                    stringResource(R.string.settings_hero_orbit),
+                ),
                 selected = if (heroStyle == "orbit") 1 else 0,
                 layout = SegLayout.Trailing,
                 onSelect = { index ->
@@ -131,44 +148,76 @@ fun SettingsPage(onOpen: (SettingsSubPage) -> Unit, onProxyChanged: () -> Unit =
                 },
             )
             PrefSwatchRow(
-                title = "主题色",
-                desc = "马卡龙色板,整套界面随之换肤",
+                title = stringResource(R.string.settings_accent_title),
+                desc = stringResource(R.string.settings_accent_desc),
+            )
+            var appLanguage by remember { mutableStateOf(Settings.appLanguage) }
+            PrefSegRow(
+                title = androidx.compose.ui.res.stringResource(R.string.settings_language_title),
+                desc = androidx.compose.ui.res.stringResource(R.string.settings_language_desc),
+                items = listOf(
+                    androidx.compose.ui.res.stringResource(R.string.settings_language_system),
+                    "中文",
+                    "English",
+                ),
+                selected = listOf(
+                    com.interstellar.proxy.ktx.AppLanguage.SYSTEM,
+                    com.interstellar.proxy.ktx.AppLanguage.CHINESE,
+                    com.interstellar.proxy.ktx.AppLanguage.ENGLISH,
+                ).indexOf(appLanguage).coerceAtLeast(0),
+                layout = SegLayout.Trailing,
+                onSelect = { index ->
+                    val value = listOf(
+                        com.interstellar.proxy.ktx.AppLanguage.SYSTEM,
+                        com.interstellar.proxy.ktx.AppLanguage.CHINESE,
+                        com.interstellar.proxy.ktx.AppLanguage.ENGLISH,
+                    )[index]
+                    appLanguage = value
+                    Settings.appLanguage = value
+                    // swap LocalContext (localized resources) under the tree —
+                    // in-place string swap, no activity recreate / flash
+                    onLanguageChanged?.invoke()
+                },
             )
         }
 
         Spacer(Modifier.height(22.dp))
 
         // ---- 分流 ----
-        PrefSectionLabel("分流")
+        PrefSectionLabel(stringResource(R.string.settings_section_split))
         GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = 6.dp) {
             PrefNavRow(
-                title = "应用分流",
-                desc = "白名单 / 黑名单控制哪些应用走代理",
+                title = stringResource(R.string.settings_per_app_title),
+                desc = stringResource(R.string.settings_per_app_desc),
                 value = when {
-                    !Settings.perAppProxyEnabled -> "关闭"
-                    Settings.perAppProxyMode == Settings.PER_APP_PROXY_INCLUDE -> "白名单 · ${Settings.perAppProxyList.size}"
-                    else -> "黑名单 · ${Settings.perAppProxyList.size}"
+                    !Settings.perAppProxyEnabled -> stringResource(R.string.settings_per_app_disabled)
+                    Settings.perAppProxyMode == Settings.PER_APP_PROXY_INCLUDE ->
+                        stringResource(R.string.settings_per_app_whitelist_count, Settings.perAppProxyList.size)
+                    else ->
+                        stringResource(R.string.settings_per_app_blacklist_count, Settings.perAppProxyList.size)
                 },
                 onClick = { onOpen(SettingsSubPage.PerApp) },
             )
             PrefNavRow(
-                title = "路由设置",
-                desc = "路由模式 / 规则细则 / 路由规则",
+                title = stringResource(R.string.settings_subpage_proxy),
+                desc = stringResource(R.string.settings_routing_desc),
                 value = when (Settings.outboundMode) {
-                    com.interstellar.proxy.data.config.ConfigBuilder.OutboundMode.GLOBAL -> "全局"
-                    com.interstellar.proxy.data.config.ConfigBuilder.OutboundMode.DIRECT -> "直连"
-                    else -> "规则"
+                    com.interstellar.proxy.data.config.ConfigBuilder.OutboundMode.GLOBAL ->
+                        stringResource(R.string.settings_mode_global)
+                    com.interstellar.proxy.data.config.ConfigBuilder.OutboundMode.DIRECT ->
+                        stringResource(R.string.rule_action_direct)
+                    else -> stringResource(R.string.settings_mode_rule)
                 },
                 onClick = { onOpen(SettingsSubPage.Proxy) },
             )
             val dnsTotal = DnsOverridesStore.entries.size
             val dnsOn = DnsOverridesStore.entries.count { it.enabled }
             PrefNavRow(
-                title = "DNS 解析",
-                desc = "域名 → IP 手动解析覆盖",
+                title = stringResource(R.string.settings_subpage_dns),
+                desc = stringResource(R.string.settings_dns_desc),
                 value = when {
-                    dnsTotal == 0 -> "未设置"
-                    else -> "$dnsOn 条启用"
+                    dnsTotal == 0 -> stringResource(R.string.settings_not_set)
+                    else -> stringResource(R.string.settings_enabled_count, dnsOn)
                 },
                 onClick = { onOpen(SettingsSubPage.Dns) },
             )
@@ -177,11 +226,11 @@ fun SettingsPage(onOpen: (SettingsSubPage) -> Unit, onProxyChanged: () -> Unit =
         Spacer(Modifier.height(22.dp))
 
         // ---- 诊断 ----
-        PrefSectionLabel("诊断")
+        PrefSectionLabel(stringResource(R.string.settings_section_diagnostics))
         GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = 6.dp) {
             PrefNavRow(
-                title = "系统日志",
-                desc = "内核实时日志流",
+                title = stringResource(R.string.settings_subpage_logs),
+                desc = stringResource(R.string.settings_logs_desc),
                 onClick = { onOpen(SettingsSubPage.Logs) },
             )
         }
@@ -189,12 +238,15 @@ fun SettingsPage(onOpen: (SettingsSubPage) -> Unit, onProxyChanged: () -> Unit =
         Spacer(Modifier.height(22.dp))
 
         // ---- 关于 ----
-        PrefSectionLabel("关于")
+        PrefSectionLabel(stringResource(R.string.settings_section_about))
         // battery-exemption state refreshes when the system dialog / settings round-trips back
+        // NB: LocalContext may be the locale wrapper — the real activity comes
+        // from the view (whose context is always the hosting activity)
+        val activity = androidx.compose.ui.platform.LocalView.current.context
         var batteryIgnored by remember {
             mutableStateOf(isIgnoringBatteryOptimizations(context))
         }
-        val lifecycleOwner = context as? androidx.activity.ComponentActivity
+        val lifecycleOwner = activity as? androidx.activity.ComponentActivity
         DisposableEffect(lifecycleOwner) {
             val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
                 if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
@@ -206,13 +258,13 @@ fun SettingsPage(onOpen: (SettingsSubPage) -> Unit, onProxyChanged: () -> Unit =
         }
         GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = 6.dp) {
             PrefNavRow(
-                title = "电池优化豁免",
+                title = stringResource(R.string.settings_battery_title),
                 desc = if (batteryIgnored) {
-                    "已加入系统白名单;厂商省电策略可点进应用设置的电池选项改为无限制"
+                    stringResource(R.string.settings_battery_desc_ignored)
                 } else {
-                    "点击在系统弹窗中允许后台运行"
+                    stringResource(R.string.settings_battery_desc_request)
                 },
-                value = if (batteryIgnored) "已豁免" else null,
+                value = if (batteryIgnored) stringResource(R.string.settings_battery_exempted) else null,
                 onClick = {
                     runCatching {
                         val packageUri = android.net.Uri.parse("package:" + context.packageName)
@@ -234,9 +286,9 @@ fun SettingsPage(onOpen: (SettingsSubPage) -> Unit, onProxyChanged: () -> Unit =
                     }
                 },
             )
-            PrefNavRow(title = "版本", value = BuildConfig.VERSION_NAME)
+            PrefNavRow(title = stringResource(R.string.settings_version_title), value = BuildConfig.VERSION_NAME)
             UpdateCheckRow()
-            PrefNavRow(title = "内核", value = "sing-box 1.14.0")
+            PrefNavRow(title = stringResource(R.string.settings_core_title), value = "sing-box 1.14.0")
         }
 
         Spacer(Modifier.height(20.dp))
@@ -269,6 +321,7 @@ private fun UpdateCheckRow() {
     var checking by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<AppUpdateChecker.Result?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    val networkErrorText = stringResource(R.string.settings_check_update_network_error)
 
     fun openReleases() {
         runCatching {
@@ -287,7 +340,7 @@ private fun UpdateCheckRow() {
         error = null
         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
             result = runCatching { AppUpdateChecker.check() }.getOrElse {
-                error = it.message ?: "网络错误"
+                error = it.message ?: networkErrorText
                 null
             }
             checking = false
@@ -295,15 +348,19 @@ private fun UpdateCheckRow() {
     }
 
     PrefRowShell(
-        title = "检查更新",
+        title = stringResource(R.string.settings_check_update_title),
         desc = when (val r = result) {
             is AppUpdateChecker.Result.UpdateAvailable ->
-                "发现新版本 v${r.latestTag},点击前往 GitHub 下载"
+                stringResource(R.string.settings_check_update_available, r.latestTag)
 
             is AppUpdateChecker.Result.UpToDate ->
-                "当前已是最新版本 (v${r.currentTag})"
+                stringResource(R.string.settings_check_update_uptodate, r.currentTag)
 
-            null -> if (error != null) "检查失败:$error" else "检测 GitHub 上的最新 Release"
+            null -> if (error != null) {
+                stringResource(R.string.settings_check_update_failed, error ?: "")
+            } else {
+                stringResource(R.string.settings_check_update_desc)
+            }
         },
         onClick = if (result is AppUpdateChecker.Result.UpdateAvailable) {
             { openReleases() }
@@ -319,12 +376,12 @@ private fun UpdateCheckRow() {
             )
 
             result is AppUpdateChecker.Result.UpdateAvailable -> CapsuleAction(
-                text = "前往更新",
+                text = stringResource(R.string.settings_check_update_go),
                 accent = colors.primary,
                 onClick = { openReleases() },
             )
 
-            else -> CapsuleAction(text = "检查", accent = colors.text, onClick = { startCheck() })
+            else -> CapsuleAction(text = stringResource(R.string.settings_check_update_btn), accent = colors.text, onClick = { startCheck() })
         }
     }
 }
@@ -542,7 +599,7 @@ private fun AccentDot(preset: Accents.Preset, selected: Boolean, modifier: Modif
             }
             Spacer(Modifier.height(4.dp))
             Text(
-                preset.label,
+                androidx.compose.ui.res.stringResource(preset.labelRes),
                 color = if (selected) colors.text else colors.textTertiary,
                 fontSize = 11.sp,
                 maxLines = 1,
@@ -570,24 +627,28 @@ fun ProxySettingsPage(viewModel: com.interstellar.proxy.ui.AppViewModel, onOpen:
         Spacer(Modifier.height(10.dp))
 
         // ---- 路由模式 ----
-        PrefSectionLabel("路由模式")
+        PrefSectionLabel(stringResource(R.string.settings_routing_mode))
         GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = 6.dp) {
-            val modes = listOf("rule" to "规则", "global" to "全局", "direct" to "直连")
+            val modes = listOf(
+                "rule" to stringResource(R.string.settings_mode_rule),
+                "global" to stringResource(R.string.settings_mode_global),
+                "direct" to stringResource(R.string.rule_action_direct),
+            )
             PrefSegRow(
-                title = "模式",
-                desc = "被代理流量的目的地走向",
+                title = stringResource(R.string.settings_mode_title),
+                desc = stringResource(R.string.settings_mode_desc),
                 items = modes.map { it.second },
                 selected = modes.indexOfFirst { it.first == routingMode }.coerceAtLeast(0),
                 layout = SegLayout.Below,
                 onSelect = { i -> viewModel.setClashMode(modes[i].first) },
             )
         }
-        IosSectionFooter("规则模式按目的地规则(大陆/局域网/自定义)分流;全局模式全部经节点;直连保持 VPN 但不代理。")
+        IosSectionFooter(stringResource(R.string.settings_routing_mode_footer))
 
         Spacer(Modifier.height(22.dp))
 
         // ---- 规则细则 ----
-        PrefSectionLabel("规则细则")
+        PrefSectionLabel(stringResource(R.string.settings_rule_details))
         GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = 6.dp) {
             var bypassLan by remember { mutableStateOf(Settings.bypassLanEnabled) }
             var bypassCn by remember { mutableStateOf(Settings.bypassCnEnabled) }
@@ -596,8 +657,8 @@ fun ProxySettingsPage(viewModel: com.interstellar.proxy.ui.AppViewModel, onOpen:
             var adBlock by remember { mutableStateOf(Settings.adBlockEnabled) }
             var regionGroups by remember { mutableStateOf(Settings.regionGroupsEnabled) }
             PrefToggleRow(
-                title = "绕过局域网",
-                desc = "访问 NAS、打印机、路由器不走代理",
+                title = stringResource(R.string.settings_bypass_lan_title),
+                desc = stringResource(R.string.settings_bypass_lan_desc),
                 checked = bypassLan,
                 onChange = {
                     bypassLan = it
@@ -606,8 +667,8 @@ fun ProxySettingsPage(viewModel: com.interstellar.proxy.ui.AppViewModel, onOpen:
                 },
             )
             PrefToggleRow(
-                title = "绕过大陆网站",
-                desc = "大陆域名与 IP 直连不走代理(仅规则模式)",
+                title = stringResource(R.string.settings_bypass_cn_title),
+                desc = stringResource(R.string.settings_bypass_cn_desc),
                 checked = bypassCn,
                 onChange = {
                     bypassCn = it
@@ -616,8 +677,8 @@ fun ProxySettingsPage(viewModel: com.interstellar.proxy.ui.AppViewModel, onOpen:
                 },
             )
             PrefToggleRow(
-                title = "海外网站走代理",
-                desc = "非大陆域名走代理(geolocation-!cn,仅规则模式)",
+                title = stringResource(R.string.settings_overseas_proxy_title),
+                desc = stringResource(R.string.settings_overseas_proxy_desc),
                 checked = overseasProxy,
                 onChange = {
                     overseasProxy = it
@@ -626,9 +687,12 @@ fun ProxySettingsPage(viewModel: com.interstellar.proxy.ui.AppViewModel, onOpen:
                 },
             )
             PrefSegRow(
-                title = "未命中规则",
-                desc = "未被任何规则匹配的流量走向(仅规则模式)",
-                items = listOf("代理", "直连"),
+                title = stringResource(R.string.settings_fallback_title),
+                desc = stringResource(R.string.settings_fallback_desc),
+                items = listOf(
+                    stringResource(R.string.rule_action_proxy),
+                    stringResource(R.string.rule_action_direct),
+                ),
                 selected = if (fallbackDirect) 1 else 0,
                 onSelect = { i ->
                     fallbackDirect = i == 1
@@ -637,8 +701,8 @@ fun ProxySettingsPage(viewModel: com.interstellar.proxy.ui.AppViewModel, onOpen:
                 },
             )
             PrefToggleRow(
-                title = "去广告",
-                desc = "拦截广告与跟踪域名",
+                title = stringResource(R.string.settings_adblock_title),
+                desc = stringResource(R.string.settings_adblock_desc),
                 checked = adBlock,
                 onChange = {
                     adBlock = it
@@ -647,8 +711,8 @@ fun ProxySettingsPage(viewModel: com.interstellar.proxy.ui.AppViewModel, onOpen:
                 },
             )
             PrefToggleRow(
-                title = "按国家分组",
-                desc = "节点页提供香港、新加坡等国家测速组",
+                title = stringResource(R.string.settings_region_groups_title),
+                desc = stringResource(R.string.settings_region_groups_desc),
                 checked = regionGroups,
                 onChange = {
                     regionGroups = it
@@ -657,37 +721,42 @@ fun ProxySettingsPage(viewModel: com.interstellar.proxy.ui.AppViewModel, onOpen:
                 },
             )
         }
-        IosSectionFooter("海外走代理 + 兜底直连 = 白名单模式:只有命中规则的域名走代理,其余直连。")
+        IosSectionFooter(stringResource(R.string.settings_whitelist_mode_footer))
 
         Spacer(Modifier.height(22.dp))
 
         // ---- 规则入口 ----
-        PrefSectionLabel("路由规则")
+        PrefSectionLabel(stringResource(R.string.settings_subpage_rules))
         GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = 6.dp) {
             val ruleOn = com.interstellar.proxy.data.SimpleRulesStore.rules.count { it.enabled }
             PrefNavRow(
-                title = "路由规则",
-                desc = "域名 → 直连 / 代理 / 指定节点",
-                value = if (ruleOn == 0) "未设置" else "$ruleOn 条启用",
+                title = stringResource(R.string.settings_subpage_rules),
+                desc = stringResource(R.string.settings_custom_rules_desc),
+                value = if (ruleOn == 0) {
+                    stringResource(R.string.settings_not_set)
+                } else {
+                    stringResource(R.string.settings_enabled_count, ruleOn)
+                },
                 onClick = { onOpen(SettingsSubPage.Rules) },
             )
         }
-        IosSectionFooter("手动规则优先级最高,先于大陆绕过等内置规则匹配。")
+        IosSectionFooter(stringResource(R.string.settings_custom_rules_footer))
 
         Spacer(Modifier.height(22.dp))
 
         // ---- 规则文件 ----
-        PrefSectionLabel("规则文件")
+        PrefSectionLabel(stringResource(R.string.settings_rule_files))
         GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = 6.dp) {
             val updating by viewModel.ruleFilesUpdating.collectAsState()
             PrefRowShell(
-                title = "更新规则文件",
+                title = stringResource(R.string.settings_rule_files_update_title),
                 desc = when (Settings.coreKind) {
                     com.interstellar.proxy.core.CoreKind.MIHOMO ->
-                        "GEO 数据库 geosite + geoip(${Settings.coreKind.displayName},约 12 MB)"
+                        stringResource(R.string.settings_rule_files_geo_mihomo, Settings.coreKind.displayName)
                     com.interstellar.proxy.core.CoreKind.XRAY ->
-                        "GEO 数据库 geosite + geoip(${Settings.coreKind.displayName},约 25 MB)"
-                    else -> "内置规则集 srs(${Settings.coreKind.displayName},约 2 MB)"
+                        stringResource(R.string.settings_rule_files_geo_xray, Settings.coreKind.displayName)
+                    else ->
+                        stringResource(R.string.settings_rule_files_srs, Settings.coreKind.displayName)
                 },
             ) {
                 if (updating) {
@@ -697,20 +766,23 @@ fun ProxySettingsPage(viewModel: com.interstellar.proxy.ui.AppViewModel, onOpen:
                         color = colors.primary,
                     )
                 } else {
-                    CapsuleAction(text = "更新", accent = colors.primary) { viewModel.updateRuleFiles() }
+                    CapsuleAction(text = stringResource(R.string.settings_rule_files_update), accent = colors.primary) { viewModel.updateRuleFiles() }
                 }
             }
         }
         val updatedAt = Settings.ruleFilesUpdatedAt
         IosSectionFooter(
-            "从 GitHub 下载最新规则,内核运行时经当前节点下载。" +
+            stringResource(R.string.settings_rule_files_footer) +
                 if (updatedAt > 0) {
-                    "上次更新:" + java.text.SimpleDateFormat(
-                        "yyyy-MM-dd HH:mm",
-                        java.util.Locale.getDefault(),
-                    ).format(java.util.Date(updatedAt))
+                    stringResource(
+                        R.string.settings_rule_files_last_update,
+                        java.text.SimpleDateFormat(
+                            "yyyy-MM-dd HH:mm",
+                            java.util.Locale.getDefault(),
+                        ).format(java.util.Date(updatedAt)),
+                    )
                 } else {
-                    "尚未更新过"
+                    stringResource(R.string.settings_rule_files_never_updated)
                 },
         )
 

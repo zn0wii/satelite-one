@@ -14,6 +14,7 @@ import io.nekohasekai.libbox.TunOptions
 import com.interstellar.proxy.data.Settings
 import com.interstellar.proxy.ktx.toIpPrefix
 import com.interstellar.proxy.ktx.toList
+import com.interstellar.proxy.ktx.wrapAppLocale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -31,6 +32,10 @@ class VPNService :
     }
 
     private val service = BoxService(this, this)
+
+    override fun attachBaseContext(base: android.content.Context?) {
+        super.attachBaseContext(base?.wrapAppLocale())
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int) = service.onStartCommand()
 

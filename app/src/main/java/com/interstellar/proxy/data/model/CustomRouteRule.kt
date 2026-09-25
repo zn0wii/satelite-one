@@ -42,7 +42,7 @@ data class CustomRouteRule(
     val filterMode: NodeFilterMode = NodeFilterMode.EXCLUDE,
     val nodeKeywords: List<String> = emptyList(),
 ) {
-    fun displayName(): String = name.trim().ifBlank { matchValue.trim().ifBlank { "未命名规则" } }
+    fun displayName(): String = name.trim().ifBlank { matchValue.trim() }
 
     fun parsedMatchValues(): List<String> = parseMatchValues(matchValue)
 }

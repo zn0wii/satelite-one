@@ -85,6 +85,13 @@ data class UiToast(val text: String, val kind: Kind) {
  * subscriptions, and start/stop orchestration.
  */
 class AppViewModel(application: Application) : AndroidViewModel(application) {
+    /** Localized string following the CURRENT language (live, no restart needed). */
+    private fun str(@androidx.annotation.StringRes id: Int): String =
+        com.interstellar.proxy.ktx.AppLanguage.getString(getApplication(), id)
+
+    private fun str(@androidx.annotation.StringRes id: Int, vararg formatArgs: Any): String =
+        com.interstellar.proxy.ktx.AppLanguage.getString(getApplication(), id, *formatArgs)
+
     private val _status = MutableStateFlow(Status.Stopped)
     val status: StateFlow<Status> = _status
 
@@ -130,12 +137,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     /** App-proxy scope as the UI sees it (drives the dashboard status row). */
     data class ProxyScope(val whitelist: Boolean, val count: Int) {
-        val label: String
-            get() = when {
-                !com.interstellar.proxy.data.Settings.perAppProxyEnabled -> "全部应用"
-                whitelist -> "白名单 · $count"
-                else -> "黑名单 · $count"
-            }
+        /** Per-app routing armed at all (label text is decided by the caller's locale). */
+        val on: Boolean
+            get() = com.interstellar.proxy.data.Settings.perAppProxyEnabled
     }
 
     private val _proxyScope = MutableStateFlow(readProxyScope())
@@ -383,7 +387,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         addSubJob = null
         _addingSub.value = false
         _addSubError.value = null
-        _message.value = "已取消导入"
+        _message.value = str(com.interstellar.proxy.R.string.vm_import_cancelled)
     }
 
     /** True while any subscription refresh triggered by pull-to-refresh runs. */
@@ -817,14 +821,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 delay(250)
                 android.util.Log.d("InterstellarUI", "activeSub=" + (SubscriptionRepository.activeSubscription()?.name ?: "null"))
                 if (SubscriptionRepository.subscriptions.isEmpty()) {
-                    _message.value = "请先添加一个订阅"
+                    _message.value = str(com.interstellar.proxy.R.string.vm_need_subscription)
                     markStopped()
                     return@launch
                 }
                 val config = SubscriptionRepository.regenerateActiveConfig()
                 if (config == null) {
                     _message.value = SubscriptionRepository.lastConfigError
-                        ?: "配置生成失败:订阅中没有可用节点"
+                        ?: str(com.interstellar.proxy.R.string.vm_config_gen_failed_no_nodes)
                     markStopped()
                     return@launch
                 }
@@ -832,7 +836,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 com.interstellar.proxy.bg.BoxService.start()
                 commandClient.connect()
             } catch (e: Exception) {
-                _message.value = "启动失败: ${e.message}"
+                _message.value = str(com.interstellar.proxy.R.string.vm_start_failed, e.message ?: "")
                 markStopped()
             } finally {
                 _busy.value = false
@@ -855,7 +859,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             val config = SubscriptionRepository.regenerateActiveConfig()
             if (config == null) {
-                _message.value = SubscriptionRepository.lastConfigError ?: "配置更新失败"
+                _message.value = SubscriptionRepository.lastConfigError
+                    ?: str(com.interstellar.proxy.R.string.vm_config_update_failed)
                 return@launch
             }
             _staticGroups.value = parseStaticGroups(config, Settings.coreKind)
@@ -983,7 +988,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             } catch (e: Exception) {
-                _message.value = "规则文件更新失败:${e.message}"
+                _message.value = str(com.interstellar.proxy.R.string.vm_rule_update_failed, e.message ?: "")
             } finally {
                 _ruleFilesUpdating.value = false
             }
@@ -1017,7 +1022,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             mihomoLastUp = -1L
             val config = SubscriptionRepository.regenerateActiveConfig()
             if (config == null) {
-                _message.value = SubscriptionRepository.lastConfigError ?: "配置更新失败"
+                _message.value = SubscriptionRepository.lastConfigError
+                    ?: str(com.interstellar.proxy.R.string.vm_config_update_failed)
                 return@launch
             }
             _staticGroups.value = parseStaticGroups(config, kind)
@@ -1068,7 +1074,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 when (Settings.coreKind) {
                     CoreKind.MIHOMO -> {
                         val ok = runCatching { clashApi.select(groupTag, itemTag) }.getOrDefault(false)
-                        if (!ok) _message.value = "切换失败: 内核 API 不可达"
+                        if (!ok) _message.value = str(com.interstellar.proxy.R.string.vm_switch_failed_api)
                         runCatching { pollMihomoOnce() }
                     }
 
@@ -1078,14 +1084,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         runCatching {
                             com.interstellar.proxy.core.XrayCore.Holder.instance?.restartFromConfigStore()
                         }.onSuccess {
-                            _message.value = "已重启 Xray 生效"
+                            _message.value = str(com.interstellar.proxy.R.string.vm_xray_restarted)
                         }
                     }
 
                     CoreKind.SINGBOX -> runCatching {
                         CommandTarget.standaloneClient().selectOutbound(groupTag, itemTag)
                     }.onFailure {
-                        _message.value = "切换失败: ${it.message}"
+                        _message.value = str(com.interstellar.proxy.R.string.vm_switch_failed, it.message ?: "")
                     }
                 }
             } else {
@@ -1176,7 +1182,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                                 }
                                 _testProgress.value = result.size to result.size
                             } else {
-                                _message.value = "测速失败: 内核 API 不可达"
+                                _message.value = str(com.interstellar.proxy.R.string.vm_test_failed_api)
                             }
                         }
 
@@ -1191,7 +1197,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             // at the bottom. Mirrors the mihomo path
                             // (groupDelay(AUTO_TAG)) and the disconnected path.
                             if (!runKernelUrlTest(manual = true)) {
-                                _message.value = "测速失败: 命令发送失败"
+                                _message.value = str(com.interstellar.proxy.R.string.vm_test_failed_send)
                             }
                         }
                     }
@@ -1200,7 +1206,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     runDisconnectedUrlTest()
                 }
             } catch (e: Exception) {
-                _message.value = "测速失败: ${e.message}"
+                _message.value = str(com.interstellar.proxy.R.string.vm_test_failed, e.message ?: "")
             } finally {
                 _testing.value = false
                 _testProgress.value = null
@@ -1286,7 +1292,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         try {
             val probe = SubscriptionRepository.regenerateActiveConfig(includeTun = false)
                 ?: throw IllegalStateException(
-                    SubscriptionRepository.lastConfigError ?: "无法生成测速配置",
+                    SubscriptionRepository.lastConfigError
+                        ?: str(com.interstellar.proxy.R.string.vm_no_test_config),
                 )
             com.interstellar.proxy.bg.BoxService.startHeadless()
             if (isMihomo) {
@@ -1300,9 +1307,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         break
                     }
                 }
-                if (!connected) throw IllegalStateException("测速服务启动超时")
+                if (!connected) throw IllegalStateException(str(com.interstellar.proxy.R.string.vm_test_service_timeout))
                 val result = clashApi.groupDelay(ConfigBuilder.AUTO_TAG)
-                    ?: throw IllegalStateException("测速命令发送失败")
+                    ?: throw IllegalStateException(str(com.interstellar.proxy.R.string.vm_test_cmd_failed))
                 _delays.value = _delays.value.toMutableMap().also { map ->
                     result.forEach { (name, delay) -> map[name] = delay }
                 }
@@ -1323,13 +1330,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     // a failed dial is not retried inside CommandClient — re-kick it
                     if (i > 0 && i % 10 == 0) commandClient.connect()
                 }
-                if (!connected) throw IllegalStateException("测速服务启动超时")
+                if (!connected) throw IllegalStateException(str(com.interstellar.proxy.R.string.vm_test_service_timeout))
                 kernelTestManual = true // manual run: progress + settle own the UI state
                 testStartEpoch = System.currentTimeMillis() / 1000
                 val ok = runCatching {
                     CommandTarget.standaloneClient().urlTest(ConfigBuilder.AUTO_TAG)
                 }.isSuccess
-                if (!ok) throw IllegalStateException("测速命令发送失败")
+                if (!ok) throw IllegalStateException(str(com.interstellar.proxy.R.string.vm_test_cmd_failed))
                 // bounded by the kernel's per-node timeout (15s) + margin —
                 // a fixed 10s here used to cut the headless core mid-run and
                 // leave the bottom nodes 未测
@@ -1384,7 +1391,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     _mixSubscriptionIds.value,
                 )
                 if (pool.isEmpty()) {
-                    showToast("没有可测的节点", UiToast.Kind.Error)
+                    showToast(str(com.interstellar.proxy.R.string.vm_no_nodes_to_test), UiToast.Kind.Error)
                     return@launch
                 }
                 val udpOnly = setOf(
@@ -1397,7 +1404,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 val skippedUdp = pool.size - pairs.size
                 if (pairs.isEmpty()) {
                     lastPingReport = PingReport(0, skippedUdp, emptyMap())
-                    showToast("全部节点为 UDP 协议, 不支持 TCP Ping, 请用测速", UiToast.Kind.Error)
+                    showToast(str(com.interstellar.proxy.R.string.vm_all_udp), UiToast.Kind.Error)
                     return@launch
                 }
                 _pingProgress.value = 0 to pairs.size
@@ -1419,10 +1426,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                                 if (value == TIMEOUT_DELAY) {
                                     failed.incrementAndGet()
                                     val reason = when (val e = outcome.exceptionOrNull()) {
-                                        null -> "超时"
-                                        is java.net.SocketTimeoutException -> "超时"
-                                        is java.net.ConnectException -> "连接被拒"
-                                        is java.net.UnknownHostException -> "域名解析失败"
+                                        null -> str(com.interstellar.proxy.R.string.vm_ping_timeout)
+                                        is java.net.SocketTimeoutException -> str(com.interstellar.proxy.R.string.vm_ping_timeout)
+                                        is java.net.ConnectException -> str(com.interstellar.proxy.R.string.vm_ping_refused)
+                                        is java.net.UnknownHostException -> str(com.interstellar.proxy.R.string.vm_ping_dns_failed)
                                         else -> e.message?.take(18)?.takeIf { it.isNotBlank() }
                                             ?: e.javaClass.simpleName
                                     }
@@ -1460,7 +1467,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
-                val msg = "下载失败: ${e.message} · 订阅域名可能无法直连, 建议开启代理后重试"
+                val msg = str(com.interstellar.proxy.R.string.vm_download_failed, e.message ?: "")
                 _message.value = msg
                 _addSubError.value = msg
             } finally {
@@ -1476,7 +1483,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             _addingSub.value = true
             _addSubError.value = null
             try {
-                importContent(name.ifBlank { "本地订阅" }, null, text, null)
+                importContent(name.ifBlank { str(com.interstellar.proxy.R.string.vm_local_subscription) }, null, text, null)
             } finally {
                 _addingSub.value = false
             }
@@ -1513,7 +1520,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 // NOT auto-checked into the mix pool: the user ticks it in the
                 // subscription list (toggleMixSubscription → applyPoolChange
                 // regenerates and the node list syncs from the state flow)
-                _message.value = "已导入 ${parsed.nodes.size} 个节点"
+                _message.value = str(com.interstellar.proxy.R.string.vm_imported_nodes, parsed.nodes.size)
             }
 
             SubscriptionParser.Result.Empty -> {
@@ -1529,11 +1536,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             configFormat = format,
                         ),
                     )
-                    _message.value = "已导入 $name(${com.interstellar.proxy.data.subscription.RawConfigFormat.from(format)?.label} 配置)"
+                    _message.value = str(
+                        com.interstellar.proxy.R.string.vm_imported_raw,
+                        name,
+                        com.interstellar.proxy.data.subscription.RawConfigFormat.from(format)?.label ?: "",
+                    )
                 } else {
                     SubscriptionRepository.rawFileOf(subId).delete()
-                    _message.value = "无法识别的订阅内容"
-                    _addSubError.value = "无法识别的订阅内容"
+                    _message.value = str(com.interstellar.proxy.R.string.vm_unrecognized_content)
+                    _addSubError.value = str(com.interstellar.proxy.R.string.vm_unrecognized_content)
                 }
             }
         }
@@ -1545,7 +1556,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshSubscription(id: String, fromPull: Boolean = false) {
         val sub = SubscriptionRepository.get(id) ?: return
         val url = sub.url ?: run {
-            showToast("本地订阅不支持刷新", UiToast.Kind.Error)
+            showToast(str(com.interstellar.proxy.R.string.vm_local_no_refresh), UiToast.Kind.Error)
             return
         }
         viewModelScope.launch(Dispatchers.IO) {
@@ -1567,7 +1578,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                                 lastUpdated = System.currentTimeMillis(),
                             ),
                         )
-                        showToast("「${sub.name}」已刷新 ${parsed.nodes.size} 个节点", UiToast.Kind.Success)
+                        showToast(str(com.interstellar.proxy.R.string.vm_refreshed, sub.name, parsed.nodes.size), UiToast.Kind.Success)
                     }
 
                     SubscriptionParser.Result.Empty ->
@@ -1575,13 +1586,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             SubscriptionRepository.upsert(
                                 sub.copy(configFormat = format, lastUpdated = System.currentTimeMillis()),
                             )
-                            showToast("「${sub.name}」配置已保留", UiToast.Kind.Success)
+                            showToast(str(com.interstellar.proxy.R.string.vm_config_kept, sub.name), UiToast.Kind.Success)
                         } else {
-                            showToast("「${sub.name}」刷新后内容无法解析", UiToast.Kind.Error)
+                            showToast(str(com.interstellar.proxy.R.string.vm_refresh_unparsable, sub.name), UiToast.Kind.Error)
                         }
                 }
             } catch (e: Exception) {
-                showToast("「${sub.name}」刷新失败: ${e.message}", UiToast.Kind.Error)
+                showToast(str(com.interstellar.proxy.R.string.vm_refresh_failed, sub.name, e.message ?: ""), UiToast.Kind.Error)
             } finally {
                 _busy.value = false
                 _refreshing.value = false
@@ -1597,7 +1608,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshAll() {
         val subs = SubscriptionRepository.subscriptions.filter { it.url != null }
         if (subs.isEmpty()) {
-            showToast("没有可更新的订阅", UiToast.Kind.Error)
+            showToast(str(com.interstellar.proxy.R.string.vm_no_sub_to_update), UiToast.Kind.Error)
             return
         }
         viewModelScope.launch(Dispatchers.IO) {
@@ -1636,9 +1647,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
                 if (ok == subs.size) {
-                    showToast("已更新全部 $ok 个订阅", UiToast.Kind.Success)
+                    showToast(str(com.interstellar.proxy.R.string.vm_updated_all, ok), UiToast.Kind.Success)
                 } else {
-                    showToast("更新完成 $ok/${subs.size} 个订阅", if (ok > 0) UiToast.Kind.Success else UiToast.Kind.Error)
+                    showToast(
+                        str(com.interstellar.proxy.R.string.vm_updated_partial, ok, subs.size),
+                        if (ok > 0) UiToast.Kind.Success else UiToast.Kind.Error,
+                    )
                 }
             } finally {
                 _busy.value = false
@@ -1722,7 +1736,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (!_mixEnabled.value) return
         val current = _mixSubscriptionIds.value
         if (id in current && current.size <= 1) {
-            _message.value = "至少保留一个订阅"
+            _message.value = str(com.interstellar.proxy.R.string.vm_keep_one_sub)
             return
         }
         val next = if (id in current) current - id else current + id
@@ -1750,7 +1764,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             _probe.value = try {
                 ProbeState.Done(com.interstellar.proxy.data.net.NetProbe.probe())
             } catch (e: Exception) {
-                ProbeState.Failed(e.message ?: "探测失败")
+                ProbeState.Failed(e.message ?: str(com.interstellar.proxy.R.string.vm_probe_failed))
             }
         }
     }

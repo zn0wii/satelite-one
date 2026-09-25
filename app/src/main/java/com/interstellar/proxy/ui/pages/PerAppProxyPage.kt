@@ -36,10 +36,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.interstellar.proxy.R
 import com.interstellar.proxy.data.Settings
 import com.interstellar.proxy.ui.AppEntry
 import com.interstellar.proxy.ui.PerAppProxyViewModel
@@ -70,7 +72,7 @@ fun PerAppProxyPage(onBack: () -> Unit) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "返回",
+                contentDescription = stringResource(R.string.perapp_back),
                 tint = colors.textSecondary,
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
@@ -79,7 +81,7 @@ fun PerAppProxyPage(onBack: () -> Unit) {
             )
             Spacer(Modifier.width(8.dp))
             Text(
-                "分应用代理",
+                stringResource(R.string.perapp_title),
                 color = colors.text,
                 fontSize = 17.sp,
                 fontWeight = FontWeight.Bold,
@@ -93,12 +95,12 @@ fun PerAppProxyPage(onBack: () -> Unit) {
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("启用分应用代理", color = colors.text, fontSize = 14.sp)
+                        Text(stringResource(R.string.perapp_enable), color = colors.text, fontSize = 14.sp)
                         Text(
                             if (mode == Settings.PER_APP_PROXY_INCLUDE) {
-                                "仅所选应用经过代理"
+                                stringResource(R.string.perapp_mode_include_desc)
                             } else {
-                                "所选应用绕过代理,其余走代理"
+                                stringResource(R.string.perapp_mode_exclude_desc)
                             },
                             color = colors.textTertiary,
                             fontSize = 12.sp,
@@ -113,8 +115,8 @@ fun PerAppProxyPage(onBack: () -> Unit) {
                     Spacer(Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(
-                            Settings.PER_APP_PROXY_INCLUDE to "白名单模式",
-                            Settings.PER_APP_PROXY_EXCLUDE to "黑名单模式",
+                            Settings.PER_APP_PROXY_INCLUDE to stringResource(R.string.perapp_mode_include),
+                            Settings.PER_APP_PROXY_EXCLUDE to stringResource(R.string.perapp_mode_exclude),
                         ).forEach { (m, label) ->
                             val isSelected = mode == m
                             Box(
@@ -136,7 +138,7 @@ fun PerAppProxyPage(onBack: () -> Unit) {
                     }
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "已选 ${selected.size} 个应用 · 修改后立即生效(内核热重载)",
+                        stringResource(R.string.perapp_selected_count, selected.size),
                         color = colors.textTertiary,
                         fontSize = 12.sp,
                     )
@@ -146,7 +148,7 @@ fun PerAppProxyPage(onBack: () -> Unit) {
         Spacer(Modifier.height(12.dp))
 
         if (!enabled) {
-            EmptyHint(text = "先启用分应用代理")
+            EmptyHint(text = stringResource(R.string.perapp_enable_hint))
             return@Column
         }
 
@@ -155,7 +157,7 @@ fun PerAppProxyPage(onBack: () -> Unit) {
             value = search,
             onValueChange = { vm.setSearch(it) },
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("搜索应用", color = colors.textTertiary) },
+            placeholder = { Text(stringResource(R.string.perapp_search_hint), color = colors.textTertiary) },
             singleLine = true,
             shape = RoundedCornerShape(12.dp),
             colors = OutlinedTextFieldDefaults.colors(
@@ -187,7 +189,7 @@ fun PerAppProxyPage(onBack: () -> Unit) {
             .toList()
 
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("显示系统应用", color = colors.text, fontSize = 14.sp, modifier = Modifier.weight(1f))
+            Text(stringResource(R.string.perapp_show_system), color = colors.text, fontSize = 14.sp, modifier = Modifier.weight(1f))
             IosSwitch(
                 checked = showSystemApps,
                 onChange = { vm.setShowSystemApps(it) },
@@ -197,19 +199,23 @@ fun PerAppProxyPage(onBack: () -> Unit) {
 
         val context = LocalContext.current
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ActionChip(text = "自动选择", primary = true) {
+            ActionChip(text = stringResource(R.string.perapp_auto_select), primary = true) {
                 val n = vm.selectCommon()
                 Toast.makeText(
                     context,
-                    if (n > 0) "已勾选 $n 个常见需代理应用" else "未发现可勾选的应用",
+                    if (n > 0) {
+                        context.getString(R.string.perapp_common_selected, n)
+                    } else {
+                        context.getString(R.string.perapp_common_none)
+                    },
                     Toast.LENGTH_SHORT,
                 ).show()
             }
-            ActionChip(text = "全选可见") { vm.selectAllVisible(visible) }
-            ActionChip(text = "清空") { vm.clearSelection() }
+            ActionChip(text = stringResource(R.string.perapp_select_visible)) { vm.selectAllVisible(visible) }
+            ActionChip(text = stringResource(R.string.perapp_clear)) { vm.clearSelection() }
         }
         Text(
-            "自动勾选 Google、Instagram、Discord、ChatGPT、Grok 等",
+            stringResource(R.string.perapp_auto_select_hint),
             color = colors.textTertiary,
             fontSize = 11.sp,
             modifier = Modifier.padding(top = 6.dp, bottom = 2.dp),
@@ -217,8 +223,8 @@ fun PerAppProxyPage(onBack: () -> Unit) {
         Spacer(Modifier.height(8.dp))
 
         when {
-            loading -> EmptyHint(text = "正在加载应用列表…")
-            visible.isEmpty() -> EmptyHint(text = "没有匹配的应用")
+            loading -> EmptyHint(text = stringResource(R.string.perapp_loading))
+            visible.isEmpty() -> EmptyHint(text = stringResource(R.string.perapp_empty))
             else -> {
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -258,7 +264,7 @@ private fun AppRow(
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    app.label + if (app.isSelf) " (本应用)" else "",
+                    app.label + if (app.isSelf) stringResource(R.string.perapp_self_suffix) else "",
                     color = colors.text,
                     fontSize = 14.sp,
                     maxLines = 1,

@@ -22,9 +22,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.interstellar.proxy.R
 import com.interstellar.proxy.ui.LogsViewModel
 import com.interstellar.proxy.ui.theme.LocalInterstellarColors
 import com.interstellar.proxy.ui.LogLine
@@ -48,14 +50,14 @@ fun LogsPage(viewModel: LogsViewModel) {
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "日志",
+                stringResource(R.string.logs_title),
                 color = colors.text,
                 fontSize = 17.sp,
                 fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
                 modifier = Modifier.weight(1f),
             )
             if (!connected) {
-                Text("未运行", color = colors.textTertiary, fontSize = 12.sp)
+                Text(stringResource(R.string.logs_not_running), color = colors.textTertiary, fontSize = 12.sp)
             }
             Spacer(Modifier.padding(4.dp))
             Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
@@ -73,7 +75,7 @@ fun LogsPage(viewModel: LogsViewModel) {
                         }
                         .padding(horizontal = 12.dp, vertical = 6.dp),
                 ) {
-                    Text("复制", color = colors.textSecondary, fontSize = 12.sp)
+                    Text(stringResource(R.string.logs_copy), color = colors.textSecondary, fontSize = 12.sp)
                 }
                 Box(
                     modifier = Modifier
@@ -82,14 +84,16 @@ fun LogsPage(viewModel: LogsViewModel) {
                         .clickable { viewModel.clearLogs() }
                         .padding(horizontal = 12.dp, vertical = 6.dp),
                 ) {
-                    Text("清空", color = colors.textSecondary, fontSize = 12.sp)
+                    Text(stringResource(R.string.logs_clear), color = colors.textSecondary, fontSize = 12.sp)
                 }
             }
         }
         Spacer(Modifier.height(8.dp))
 
         if (logs.isEmpty()) {
-            EmptyHint(text = if (connected) "等待日志…" else "启动内核后查看日志")
+            EmptyHint(
+                text = if (connected) stringResource(R.string.logs_waiting) else stringResource(R.string.logs_start_hint),
+            )
             return@Column
         }
 

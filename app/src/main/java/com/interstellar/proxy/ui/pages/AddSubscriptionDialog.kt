@@ -22,10 +22,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.interstellar.proxy.R
 import com.interstellar.proxy.ui.theme.LocalInterstellarColors
 
 @Composable
@@ -50,18 +52,23 @@ fun AddSubscriptionDialog(
                 .background(colors.panelSolid)
                 .padding(18.dp),
         ) {
-            Text("添加订阅", color = colors.text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text(
+                stringResource(R.string.adddlg_title),
+                color = colors.text,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+            )
 
             Spacer(Modifier.height(14.dp))
 
             Row {
-                TabChip("链接导入", mode == "url") { mode = "url" }
+                TabChip(stringResource(R.string.adddlg_tab_url), mode == "url") { mode = "url" }
                 Spacer(Modifier.width(8.dp))
-                TabChip("文本导入", mode == "text") { mode = "text" }
+                TabChip(stringResource(R.string.adddlg_tab_text), mode == "text") { mode = "text" }
             }
             Spacer(Modifier.height(12.dp))
 
-            Field(name, { name = it }, "名称(可选)")
+            Field(name, { name = it }, stringResource(R.string.adddlg_field_name_optional))
             Spacer(Modifier.height(8.dp))
             if (mode == "url") {
                 val context = androidx.compose.ui.platform.LocalContext.current
@@ -69,12 +76,12 @@ fun AddSubscriptionDialog(
                     value = url,
                     onValueChange = { url = it },
                     modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("https://… 订阅链接", color = colors.textTertiary, fontSize = 12.sp) },
+                    placeholder = { Text(stringResource(R.string.adddlg_url_placeholder), color = colors.textTertiary, fontSize = 12.sp) },
                     singleLine = true,
                     shape = RoundedCornerShape(12.dp),
                     trailingIcon = {
                         Text(
-                            "粘贴",
+                            stringResource(R.string.adddlg_paste),
                             color = colors.accent,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Medium,
@@ -107,7 +114,7 @@ fun AddSubscriptionDialog(
                         .height(140.dp),
                     placeholder = {
                         Text(
-                            "粘贴 Clash YAML / 分享链接",
+                            stringResource(R.string.adddlg_text_placeholder),
                             color = colors.textTertiary,
                             fontSize = 12.sp,
                         )
@@ -146,7 +153,7 @@ fun AddSubscriptionDialog(
             ) {
                 if (loading) {
                     Text(
-                        "正在导入…",
+                        stringResource(R.string.adddlg_importing),
                         color = colors.textTertiary,
                         fontSize = 13.sp,
                     )
@@ -157,11 +164,11 @@ fun AddSubscriptionDialog(
                         color = colors.primary,
                     )
                     Spacer(Modifier.width(10.dp))
-                    ActionChip(text = "取消", danger = true) { onCancel() }
+                    ActionChip(text = stringResource(R.string.adddlg_cancel), danger = true) { onCancel() }
                 } else {
-                    ActionChip(text = "取消") { onDismiss() }
+                    ActionChip(text = stringResource(R.string.adddlg_cancel)) { onDismiss() }
                     Spacer(Modifier.width(10.dp))
-                    ActionChip(text = "导入", primary = true) {
+                    ActionChip(text = stringResource(R.string.adddlg_import), primary = true) {
                         if (enabled) {
                             if (mode == "url") onAddUrl(name, url) else onAddText(name, text)
                         }

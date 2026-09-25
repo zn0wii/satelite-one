@@ -31,6 +31,13 @@ object GeoRuleUpdater {
     private const val TAG = "GeoRuleUpdater"
     private const val MIXED_PORT = 2080
 
+    /** Localized string following the CURRENT language (live, no restart needed). */
+    private fun str(id: Int): String =
+        com.interstellar.proxy.ktx.AppLanguage.getString(InterstellarApplication.application, id)
+
+    private fun str(id: Int, vararg formatArgs: Any): String =
+        com.interstellar.proxy.ktx.AppLanguage.getString(InterstellarApplication.application, id, *formatArgs)
+
     private data class GeoFile(
         val name: String,
         val urls: List<String>,
@@ -164,7 +171,7 @@ object GeoRuleUpdater {
             }
         }
         if (ok == 0) {
-            error("下载失败(${failed.joinToString("、")}),请检查网络后重试")
+            error(str(com.interstellar.proxy.R.string.geo_download_failed, failed.joinToString("、")))
         }
         Settings.ruleFilesUpdatedAt = System.currentTimeMillis()
         // keep the sidecar extraction markers truthful so a later startup's
@@ -173,7 +180,11 @@ object GeoRuleUpdater {
             val dir = if (core == CoreKind.MIHOMO) "mihomo" else "xray"
             File(File(InterstellarApplication.application.filesDir, dir), "geodata.extracted").writeText("1")
         }
-        if (failed.isEmpty()) "规则文件已更新($ok 个)" else "已更新 $ok 个,失败:${failed.joinToString("、")}"
+        if (failed.isEmpty()) {
+            str(com.interstellar.proxy.R.string.geo_updated_all, ok)
+        } else {
+            str(com.interstellar.proxy.R.string.geo_updated_partial, ok, failed.joinToString("、"))
+        }
     }
 
     /** One file: temp download → validate → atomic swap. */
@@ -207,14 +218,14 @@ object GeoRuleUpdater {
                     }
                 }
             }
-            if (!downloaded) throw lastError ?: IllegalStateException("下载失败")
+            if (!downloaded) throw lastError ?: IllegalStateException(str(com.interstellar.proxy.R.string.geo_download_short))
             if (!file.validate(tmp)) {
-                throw IllegalStateException("文件校验失败(非有效规则文件)")
+                throw IllegalStateException(str(com.interstellar.proxy.R.string.geo_invalid_file))
             }
             if (!tmp.renameTo(file.target)) {
                 // rename can fail across a mounted state or AV scan — replace instead
                 file.target.delete()
-                if (!tmp.renameTo(file.target)) throw IllegalStateException("替换文件失败")
+                if (!tmp.renameTo(file.target)) throw IllegalStateException(str(com.interstellar.proxy.R.string.geo_replace_failed))
             }
         } finally {
             tmp.delete()

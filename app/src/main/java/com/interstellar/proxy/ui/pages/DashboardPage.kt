@@ -71,6 +71,7 @@ import com.interstellar.proxy.ui.components.SegmentedControl
 import com.interstellar.proxy.ui.components.StatusPill
 import com.interstellar.proxy.ui.components.glassSurface
 import com.interstellar.proxy.ui.components.pressableClick
+import com.interstellar.proxy.ui.localizedCountryName
 import com.interstellar.proxy.ui.theme.LocalInterstellarColors
 import com.interstellar.proxy.ui.theme.Motion
 import io.nekohasekai.libbox.Libbox
@@ -162,7 +163,7 @@ fun DashboardPage(
                 }
                 GlassIconButton(
                     icon = Icons.AutoMirrored.Outlined.TrendingUp,
-                    contentDescription = "监控",
+                    contentDescription = stringResource(R.string.dash_monitor),
                 ) { onOpenSubPage(SettingsSubPage.Connections) }
             }
 
@@ -203,6 +204,7 @@ fun DashboardPage(
 
             // ── 节点名（大字，自动缩放）：连接中显示实时出口，未连接显示下次将使用的节点
             val connected = status == Status.Started || status == Status.Starting
+            val context = androidx.compose.ui.platform.LocalContext.current
             val resolvedNode = nodeRowValue(groups, delays, mainGroup, storedSelected)
             val picking = connected && (resolvedNode == "自动" || resolvedNode == "未选择")
             // 选择中呼吸动画只在 picking 时运转,其余时间零帧开销
@@ -220,9 +222,14 @@ fun DashboardPage(
                 1f
             }
             val nodeTitle = when {
-                picking -> "选择中…"
-                resolvedNode != "未选择" -> resolvedNode
-                else -> "未选择节点"
+                picking -> stringResource(R.string.dash_picking)
+                resolvedNode != "未选择" -> with(context) {
+                    when (resolvedNode) {
+                        "自动" -> getString(R.string.group_auto)
+                        else -> com.interstellar.proxy.ui.LocalizedNames.groupName(context, resolvedNode)
+                    }
+                }
+                else -> stringResource(R.string.dash_node_none)
             }
             // 固定字号 + 固定行高：节点名长度/状态变化不影响下方布局
             Text(
@@ -246,9 +253,9 @@ fun DashboardPage(
             if (running && mainGroup != null) {
                 val delay = delayOf(groups, delays)
                 val delayText = when {
-                    delay <= 0 -> "测速中"
-                    delay > 65000 -> "超时"
-                    else -> "${delay} ms"
+                    delay <= 0 -> stringResource(R.string.dash_testing)
+                    delay > 65000 -> stringResource(R.string.dash_timeout)
+                    else -> stringResource(R.string.dash_delay_ms, delay)
                 }
                 val protocol = currentLeafTag(groups, delays, mainGroup)?.let { protocolByTag[it] }
                 Spacer(Modifier.height(2.dp))
@@ -268,9 +275,9 @@ fun DashboardPage(
                 // 与运行中的协议行同款内边距,两态行高一致,布局零漂移
                 Text(
                     when (status) {
-                        Status.Starting -> "正在建立隧道…"
-                        Status.Stopping -> "正在断开…"
-                        else -> "轻点图标以连接"
+                        Status.Starting -> stringResource(R.string.dash_connecting)
+                        Status.Stopping -> stringResource(R.string.dash_disconnecting)
+                        else -> stringResource(R.string.dash_tap_to_connect)
                     },
                     color = colors.textTertiary,
                     fontSize = 13.sp,
@@ -283,30 +290,30 @@ fun DashboardPage(
 
             // ── 状态标签: 居中三胶囊, 点击进入对应设置 ──
             val routingLabel = when (routingMode) {
-                "global" -> "全局"
-                "direct" -> "直连"
-                else -> "规则"
+                "global" -> stringResource(R.string.dash_route_global)
+                "direct" -> stringResource(R.string.dash_route_direct)
+                else -> stringResource(R.string.dash_route_rule)
             }
-            val scopeOn = proxyScope.label != "全部应用"
+            val scopeOn = proxyScope.on
             val switchModeLabel = when (storedSelected) {
-                ConfigBuilder.AUTO_TAG -> "自动"
-                ConfigBuilder.SMART_TAG -> "智能"
-                else -> "手动"
+                ConfigBuilder.AUTO_TAG -> stringResource(R.string.dash_mode_auto)
+                ConfigBuilder.SMART_TAG -> stringResource(R.string.dash_mode_smart)
+                else -> stringResource(R.string.dash_mode_manual)
             }
             Row(
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                StatusChip(label = "路由模式", value = routingLabel) {
+                StatusChip(label = stringResource(R.string.dash_label_route), value = routingLabel) {
                     onOpenSubPage(SettingsSubPage.Proxy)
                 }
                 Spacer(Modifier.width(10.dp))
-                StatusChip(label = "应用分流", value = if (scopeOn) "开" else "关") {
+                StatusChip(label = stringResource(R.string.dash_label_scope), value = if (scopeOn) stringResource(R.string.dash_scope_on) else stringResource(R.string.dash_scope_off)) {
                     onOpenSubPage(SettingsSubPage.PerApp)
                 }
                 Spacer(Modifier.width(10.dp))
-                StatusChip(label = "切换模式", value = switchModeLabel) {
+                StatusChip(label = stringResource(R.string.dash_label_switch), value = switchModeLabel) {
                     onOpenTab(MainTab.Nodes)
                 }
             }
@@ -333,7 +340,7 @@ fun DashboardPage(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(
-                    "内核",
+                    stringResource(R.string.dash_core_label),
                     color = colors.textTertiary,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Medium,
@@ -366,7 +373,7 @@ fun DashboardPage(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 InstrumentCard(
-                    caption = "核心",
+                    caption = stringResource(R.string.dash_caption_core),
                     onClick = { onOpenSubPage(SettingsSubPage.Logs) },
                     modifier = Modifier.weight(1f),
                     secondary = {
@@ -411,12 +418,12 @@ fun DashboardPage(
                     else -> activeConnectionCount
                 }
                 InstrumentCard(
-                    caption = "流量",
+                    caption = stringResource(R.string.dash_caption_traffic),
                     onClick = { onOpenSubPage(SettingsSubPage.Connections) },
                     modifier = Modifier.weight(1f),
                     secondary = {
                         Text(
-                            "Σ $total · $connectionCount 连接",
+                            stringResource(R.string.dash_traffic_summary, total, connectionCount),
                             color = colors.textTertiary,
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace,
@@ -456,7 +463,7 @@ fun DashboardPage(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 InstrumentCard(
-                    caption = "出口网络",
+                    caption = stringResource(R.string.dash_caption_probe),
                     onClick = { viewModel.probeNetwork() },
                     modifier = Modifier.weight(1f),
                     secondary = {
@@ -464,9 +471,9 @@ fun DashboardPage(
                         if (sp is ProbeState.Done) {
                             Text(
                                 listOfNotNull(
-                                    sp.result.country,
-                                    "${sp.result.latencyMs} ms",
-                                    if (sp.result.viaProxy) "经代理" else "直连",
+                                    localizedCountryName(sp.result.country),
+                                    stringResource(R.string.dash_delay_ms, sp.result.latencyMs),
+                                    if (sp.result.viaProxy) stringResource(R.string.dash_probe_via_proxy) else stringResource(R.string.dash_probe_direct),
                                 ).joinToString(" · "),
                                 color = colors.textTertiary,
                                 fontSize = 11.sp,
@@ -478,7 +485,7 @@ fun DashboardPage(
                 ) {
                     when (val p = probe) {
                         ProbeState.Running -> Text(
-                            "探测中…",
+                            stringResource(R.string.dash_probing),
                             color = colors.textTertiary,
                             fontSize = 15.sp,
                             fontFamily = FontFamily.Monospace,
@@ -495,7 +502,7 @@ fun DashboardPage(
                         )
 
                         is ProbeState.Failed -> Text(
-                            "探测失败 · 点击重试",
+                            stringResource(R.string.dash_probe_failed),
                             color = colors.warning,
                             fontSize = 12.sp,
                             maxLines = 2,
@@ -503,7 +510,7 @@ fun DashboardPage(
                         )
 
                         ProbeState.Idle -> Text(
-                            "点击检测出口 IP",
+                            stringResource(R.string.dash_probe_idle),
                             color = colors.textTertiary,
                             fontSize = 13.sp,
                         )
@@ -519,12 +526,12 @@ fun DashboardPage(
                 val used = quotaSubs.sumOf { it.uploadBytes + it.downloadBytes }
                 val totalBytes = quotaSubs.sumOf { it.totalBytes }
                 val label = when {
-                    mixEnabled && quotaSubs.isNotEmpty() -> "Mix · ${quotaSubs.size} 订阅"
+                    mixEnabled && quotaSubs.isNotEmpty() -> stringResource(R.string.dash_mix_subs, quotaSubs.size)
                     activeSub != null -> activeSub.name
-                    else -> "未添加"
+                    else -> stringResource(R.string.dash_subs_none)
                 }
                 InstrumentCard(
-                    caption = "订阅",
+                    caption = stringResource(R.string.dash_caption_subs),
                     onClick = { onOpenTab(MainTab.Subscriptions) },
                     modifier = Modifier.weight(1f),
                     secondary = {
@@ -553,10 +560,10 @@ fun DashboardPage(
                             Spacer(Modifier.height(4.dp))
                         }
                         Text(
-                            "$pool 节点" + if (totalBytes > 0) {
-                                " · ${Libbox.formatBytes(used)} / ${Libbox.formatBytes(totalBytes)}"
+                            if (totalBytes > 0) {
+                                stringResource(R.string.dash_sub_nodes_quota, pool, Libbox.formatBytes(used), Libbox.formatBytes(totalBytes))
                             } else {
-                                ""
+                                stringResource(R.string.dash_sub_nodes, pool)
                             },
                             color = colors.textTertiary,
                             fontSize = 11.sp,
@@ -585,9 +592,9 @@ fun DashboardPage(
             ) {
                 GlassButton(
                     text = when {
-                        running -> "断开连接"
-                        status == Status.Starting -> "启动中…"
-                        else -> "启动代理"
+                        running -> stringResource(R.string.dash_disconnect)
+                        status == Status.Starting -> stringResource(R.string.dash_starting)
+                        else -> stringResource(R.string.dash_start_proxy)
                     },
                     style = if (running) GlassButtonStyle.Danger else GlassButtonStyle.Primary,
                     enabled = !busy && status != Status.Starting,
@@ -598,7 +605,7 @@ fun DashboardPage(
                     modifier = Modifier.weight(1f),
                 )
                 GlassButton(
-                    text = "切换节点",
+                    text = stringResource(R.string.dash_switch_node),
                     style = GlassButtonStyle.Secondary,
                     onClick = { onOpenTab(MainTab.Nodes) },
                     modifier = Modifier.weight(1f),
@@ -697,13 +704,14 @@ private fun SmartStatusLine(
     onClick: () -> Unit,
 ) {
     val colors = LocalInterstellarColors.current
+    val context = androidx.compose.ui.platform.LocalContext.current
     val delayText = state.currentDelayMs.takeIf { it > 0 }?.let { "${it}ms" }
     val body = when {
-        !running -> "连接后自动择优"
-        state.alert != null -> state.alert
+        !running -> stringResource(R.string.smart_idle_hint)
+        state.alert != null -> com.interstellar.proxy.ui.LocalizedNames.smartAlertText(context, state.alert)
         else -> buildString {
-            append(state.phase)
-            state.currentTag?.let { append(" · $it") }
+            append(com.interstellar.proxy.ui.LocalizedNames.smartPhaseText(context, state.phase))
+            state.currentTag?.let { append(" · " + com.interstellar.proxy.ui.LocalizedNames.groupName(context, it)) }
             delayText?.let { append(" · $it") }
         }
     }
@@ -716,7 +724,7 @@ private fun SmartStatusLine(
             .padding(horizontal = 8.dp, vertical = 2.dp),
     ) {
         Text(
-            "智能",
+            stringResource(R.string.group_smart),
             color = colors.primary,
             fontSize = 11.sp,
             fontWeight = FontWeight.SemiBold,

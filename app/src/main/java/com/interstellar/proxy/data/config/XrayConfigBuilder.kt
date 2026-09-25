@@ -21,6 +21,18 @@ import org.json.JSONObject
  */
 object XrayConfigBuilder {
 
+    /** Localized via the live app locale; plain English under JVM unit tests. */
+    private fun str(id: Int, vararg formatArgs: Any): String = runCatching {
+        val app = com.interstellar.proxy.InterstellarApplication.application
+        com.interstellar.proxy.ktx.AppLanguage.getString(app, id, *formatArgs)
+    }.getOrElse {
+        when (id) {
+            com.interstellar.proxy.R.string.xray_skipped_nodes ->
+                "Skipped %1\$d nodes unsupported by Xray (tuic/anytls/ssh/shadow-tls/quic)".format(*formatArgs)
+            else -> "No Xray-supported nodes in the subscription (ss/vmess/vless/trojan/socks/http/wireguard/hysteria2)"
+        }
+    }
+
     const val GROUP_TAG = ConfigBuilder.GROUP_TAG
     const val AUTO_TAG = ConfigBuilder.AUTO_TAG
     private const val PROXY_TAG = "proxy"
@@ -42,12 +54,12 @@ object XrayConfigBuilder {
         val usable = nodes.filter { it.type in SUPPORTED && it.shadowTls == null && it.network != "quic" }
         val unsupported = nodes.size - usable.size
         skippedReport = if (unsupported > 0) {
-            "已跳过 $unsupported 个 Xray 不支持的节点(tuic/anytls/ssh/shadow-tls/quic)"
+            str(com.interstellar.proxy.R.string.xray_skipped_nodes, unsupported)
         } else {
             null
         }
         if (usable.isEmpty()) {
-            throw IllegalStateException("订阅中没有 Xray 支持的节点 (支持 ss/vmess/vless/trojan/socks/http/wireguard/hysteria2)")
+            throw IllegalStateException(str(com.interstellar.proxy.R.string.xray_no_supported_nodes))
         }
 
         val tags = ConfigBuilder.tagsFor(usable)

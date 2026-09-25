@@ -14,8 +14,7 @@ data class DnsOverrideEntry(
     val domains: String = "",
     val ip: String = "",
 ) {
-    fun displayName(): String =
-        domains.trim().ifBlank { "未命名解析" }
+    fun displayName(): String = domains.trim()
 
     fun parsedDomains(): List<String> = parseDnsDomains(domains)
 }
