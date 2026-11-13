@@ -149,27 +149,28 @@ fun NodesPage(viewModel: AppViewModel) {
         }
     }
 
-    // ── 底部测速/Ping 进度条与完成摘要 ──
-    val testProg by viewModel.testProgress.collectAsState()
+    // ── 节点级测速反馈:运行中卡片转圈,结果到达即显示毫秒 ──
     val pingRunning by viewModel.pinging.collectAsState()
-    val pingProg by viewModel.pingProgress.collectAsState()
-    var testSummary by remember { mutableStateOf<NodesTestSummary?>(null) }
     var prevRunning by remember { mutableStateOf(false) }
-    var lastMode by remember { mutableStateOf("测速") }
+    // nodes still waiting for THIS run's result — they spin; the pre-run
+    // delay snapshot tells "new value" (arrived) from "stale value" (pending)
+    var pendingTags by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var preRunDelays by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     val testRunning = testing || pingRunning
-    // resolved in composition: computeNodesTestSummary runs outside composable scope
-    val genericFailNote = stringResource(R.string.nodes_test_fail_generic)
     LaunchedEffect(testRunning) {
-        if (testRunning) {
-            lastMode = if (pingRunning) "Ping" else "测速"
-            testSummary = null // a new run clears the old summary
-        } else if (prevRunning) {
-            // just finished — snapshot stats over the current pool tags
-            val tags = ConfigBuilder.tagsFor(storedNodes)
-            val pingReport = if (lastMode == "Ping") viewModel.lastPingReport else null
-            testSummary = computeNodesTestSummary(lastMode, tags, delays, pingReport, genericFailNote)
-        }
+        // run over — any never-arrived node drops back to its badge
+        if (!testRunning && prevRunning) pendingTags = emptySet()
         prevRunning = testRunning
+    }
+    // results stream in one by one (ping / per-node probes) — a node whose
+    // value moved off the pre-run snapshot is done; take it out of the
+    // spinner set
+    LaunchedEffect(delays) {
+        if (pendingTags.isEmpty()) return@LaunchedEffect
+        val arrived = pendingTags.filterTo(mutableSetOf()) { tag ->
+            (delays[tag] ?: 0) != (preRunDelays[tag] ?: 0)
+        }
+        if (arrived.isNotEmpty()) pendingTags -= arrived
     }
 
     Column(
@@ -220,11 +221,28 @@ fun NodesPage(viewModel: AppViewModel) {
             }
         }
         val nodeItems = remember(allItems) { allItems.filterNot(::isGroupItem) }
-        // group references (region / airport sub-groups) ride at the list head
-        // as tappable group cards — tapping points THIS group at them. The
-        // auto group reference is skipped: the top 自动 tab IS its switch.
-        val groupItems = remember(allItems) {
-            allItems.filter(::isGroupItem).filterNot { it.tag == ConfigBuilder.AUTO_TAG }
+        // group references ride at the list head — only on GROUP tabs, where
+        // they pick a nested sub-group inside the group (raw configs nest
+        // selectors). The MAIN tab's group cards are gone: pointing main at
+        // a urltest group is exactly what the ⚡ tab capsules already do
+        // (with real selected state), so the cards read as dead weight.
+        // The auto group reference is always skipped: the 自动 tab IS its switch.
+        val groupItems = remember(allItems, isMainTab) {
+            if (isMainTab) {
+                emptyList()
+            } else {
+                allItems.filter(::isGroupItem).filterNot { it.tag == ConfigBuilder.AUTO_TAG }
+            }
+        }
+        // a group-tab test/ping covers only that group's nodes — its member
+        // tags that map into the stored pool (raw-config member names that
+        // don't map degrade to a whole-pool run)
+        val testScopeTags = if (isMainTab) {
+            null
+        } else {
+            currentTab?.items?.map { it.tag }
+                ?.filter { nodeByTag.containsKey(it) }
+                ?.takeIf { it.isNotEmpty() }
         }
         // smart mode is only ever visible in the STORED selection (the live
         // group always names a concrete node) — it wins the highlight race;
@@ -243,7 +261,19 @@ fun NodesPage(viewModel: AppViewModel) {
         }?.takeIf { it.isNotBlank() }
         val selectedTag = when {
             isSmartTab -> smartState.currentTag ?: ""
-            !isMainTab -> runtimeSelected ?: ""
+            !isMainTab -> {
+                // main riding a concrete node that lives in THIS group (a
+                // manual pick made from the tab) wins the highlight;
+                // otherwise the group's own selection (auto pick / pinned node)
+                val mainSel = mainRuntimeSelected
+                if (mainSel != null && groups.none { it.tag == mainSel } &&
+                    currentTab?.items?.any { it.tag == mainSel } == true
+                ) {
+                    mainSel
+                } else {
+                    runtimeSelected ?: ""
+                }
+            }
             storedSelected == ConfigBuilder.SMART_TAG -> ConfigBuilder.SMART_TAG
             else -> {
                 val sel = mainRuntimeSelected
@@ -379,7 +409,14 @@ fun NodesPage(viewModel: AppViewModel) {
                 modifier = Modifier
                     .clip(RoundedCornerShape(12.dp))
                     .background(colors.primaryMuted)
-                    .pressableClick { viewModel.urlTest(currentTab?.tag ?: ConfigBuilder.GROUP_TAG) }
+                    .pressableClick {
+                        if (!testRunning) {
+                            preRunDelays = delays
+                            pendingTags = nodeItems.map { it.tag }.toSet()
+                        }
+                        // group tab → its own group; main tab → whole pool
+                        viewModel.urlTest(if (isMainTab) null else currentTab?.tag, testScopeTags)
+                    }
                     .padding(horizontal = 16.dp, vertical = 10.dp),
             ) {
                 if (testActive) {
@@ -427,7 +464,13 @@ fun NodesPage(viewModel: AppViewModel) {
                 modifier = Modifier
                     .clip(RoundedCornerShape(12.dp))
                     .background(if (pinging) colors.primaryMuted else colors.bgDeep)
-                    .pressableClick { viewModel.tcpPingPool() }
+                    .pressableClick {
+                        if (!testRunning) {
+                            preRunDelays = delays
+                            pendingTags = nodeItems.map { it.tag }.toSet()
+                        }
+                        viewModel.tcpPingPool(testScopeTags)
+                    }
                     .padding(horizontal = 14.dp, vertical = 10.dp),
             ) {
                 if (pinging) {
@@ -482,18 +525,6 @@ fun NodesPage(viewModel: AppViewModel) {
             )
         }
 
-        // ── 进度条/统计摘要: 悬于节点卡片上方 ──
-        if (testRunning || testSummary != null) {
-            TestSummaryBar(
-                running = testRunning,
-                mode = lastMode,
-                progress = if (pingRunning) pingProg else testProg,
-                summary = testSummary,
-                onDismiss = { testSummary = null },
-                modifier = Modifier.padding(bottom = 8.dp),
-            )
-        }
-
         val sorted = remember(nodeItems, sortMode, delays) {
             when (sortMode) {
                 1 -> nodeItems.sortedBy { it.tag.lowercase() }
@@ -509,8 +540,36 @@ fun NodesPage(viewModel: AppViewModel) {
         val onNodeTap: (NodeEntry) -> Unit = { item ->
             when {
                 item.tag == ConfigBuilder.SMART_TAG -> viewModel.selectSmartMode()
-                // urltest groups pick their own node — selection taps are no-ops
-                !tabSelectable && !isMainTab -> Unit
+
+                // group reference card (group tabs only): select it within the
+                // group's own selector (nested pick). A urltest group can't
+                // hold a selection — jump to the tapped group's tab instead
+                // of a dead tap
+                isGroupItem(item) -> if (isMainTab || tabSelectable) {
+                    viewModel.selectNode(currentTab?.tag ?: ConfigBuilder.GROUP_TAG, item.tag)
+                } else if (groups.any { it.tag == item.tag }) {
+                    activeTab = item.tag
+                } else {
+                    Unit
+                }
+
+                // a node tap on a group tab ALWAYS switches traffic and lands
+                // on manual: generated configs carry every node in the main
+                // selector, so the pick goes straight there (a urltest group
+                // can't hold one); raw configs whose group holds nodes the
+                // main lacks pin the node inside the group and route main
+                // through it
+                !isMainTab -> {
+                    val tab = currentTab
+                    if (tab != null && tabSelectable &&
+                        mainGroup?.items?.any { it.tag == item.tag } != true
+                    ) {
+                        viewModel.selectNodeViaGroup(tab.tag, item.tag)
+                    } else {
+                        viewModel.selectNode(mainGroup?.tag ?: ConfigBuilder.GROUP_TAG, item.tag)
+                    }
+                }
+
                 else -> viewModel.selectNode(currentTab?.tag ?: ConfigBuilder.GROUP_TAG, item.tag)
             }
         }
@@ -538,6 +597,7 @@ fun NodesPage(viewModel: AppViewModel) {
                             item = item,
                             delay = delays[item.tag] ?: item.delay,
                             selected = item.tag == selectedTag,
+                            pending = item.tag in pendingTags,
                             onClick = { onNodeTap(item) },
                             onLongPress = { if (!isGroupItem(item)) detailItem = item },
                         )
@@ -561,6 +621,7 @@ fun NodesPage(viewModel: AppViewModel) {
                             item = item,
                             delay = delays[item.tag] ?: item.delay,
                             selected = item.tag == selectedTag,
+                            pending = item.tag in pendingTags,
                             onClick = { onNodeTap(item) },
                             onLongPress = { if (!isGroupItem(item)) detailItem = item },
                         )
@@ -575,177 +636,13 @@ fun NodesPage(viewModel: AppViewModel) {
     }
 }
 
-/** Stats snapshot shown after a url-test / ping run finishes. */
-private data class NodesTestSummary(
-    val mode: String,
-    val total: Int,
-    val okCount: Int,
-    val minMs: Int,
-    val maxMs: Int,
-    val p50: Int,
-    val p95: Int,
-    val failed: Int = 0,
-    /** Aggregated failure reasons ("超时 12 · 连接被拒 3"), or a generic note for kernel tests. */
-    val failNote: String? = null,
-    /** UDP-protocol nodes TCP ping can't cover (use url-test instead). */
-    val skippedUdp: Int = 0,
-)
-
-/** ok = tested with a real delay (sentinels and untested excluded). */
-private fun computeNodesTestSummary(
-    mode: String,
-    tags: List<String>,
-    delays: Map<String, Int>,
-    pingReport: com.interstellar.proxy.ui.AppViewModel.PingReport? = null,
-    genericFailNote: String,
-): NodesTestSummary {
-    val values = tags.mapNotNull { tag ->
-        delays[tag]?.takeIf { it > 0 && it < 65_000 }
-    }.sorted()
-    fun pct(p: Double) = if (values.isEmpty()) 0 else values[((values.size - 1) * p).toInt()]
-    val skippedUdp = pingReport?.skippedUdp ?: 0
-    val failed = pingReport?.failed ?: (tags.size - values.size - 0).coerceAtLeast(0)
-    val failNote = when {
-        failed <= 0 -> null
-
-        pingReport != null && pingReport.reasons.isNotEmpty() ->
-            pingReport.reasons.entries.sortedByDescending { it.value }
-                .joinToString(" · ") { "${it.key} ${it.value}" }
-
-        else -> genericFailNote
-    }
-    return NodesTestSummary(
-        mode = mode,
-        total = tags.size,
-        okCount = values.size,
-        minMs = values.firstOrNull() ?: 0,
-        maxMs = values.lastOrNull() ?: 0,
-        p50 = pct(0.50),
-        p95 = pct(0.95),
-        failed = failed,
-        failNote = failNote,
-        skippedUdp = skippedUdp,
-    )
-}
-
-@Composable
-private fun TestSummaryBar(
-    running: Boolean,
-    mode: String,
-    progress: Pair<Int, Int>?,
-    summary: NodesTestSummary?,
-    onDismiss: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val colors = LocalInterstellarColors.current
-    // lastMode stores the raw functional value ("Ping"/"测速") — localize at display
-    val modeLabel = if (mode == "Ping") "Ping" else stringResource(R.string.nodes_url_test)
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(colors.panelSolid)
-            .pressableClick { onDismiss() }
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-    ) {
-        if (running) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    stringResource(R.string.nodes_mode_running_fmt, modeLabel),
-                    color = colors.text,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    progress?.let { "${it.first}/${it.second}" } ?: "…",
-                    color = colors.textTertiary,
-                    fontSize = 13.sp,
-                    fontFamily = FontFamily.Monospace,
-                )
-                Spacer(Modifier.weight(1f))
-                Text(
-                    stringResource(R.string.nodes_summary_pending_hint),
-                    color = colors.textTertiary,
-                    fontSize = 10.sp,
-                )
-            }
-            Spacer(Modifier.height(8.dp))
-            val fraction = progress?.takeIf { it.second > 0 }?.let { it.first.toFloat() / it.second } ?: 0f
-            androidx.compose.material3.LinearProgressIndicator(
-                progress = { fraction },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(4.dp)
-                    .clip(RoundedCornerShape(2.dp)),
-                color = colors.primary,
-                trackColor = colors.primaryMuted,
-            )
-        } else if (summary != null) {
-            val summaryModeLabel =
-                if (summary.mode == "Ping") "Ping" else stringResource(R.string.nodes_url_test)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    stringResource(R.string.nodes_mode_done_fmt, summaryModeLabel),
-                    color = colors.primary,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    stringResource(
-                        R.string.nodes_summary_stats_fmt,
-                        summary.total,
-                        summary.okCount,
-                        summary.failed,
-                    ),
-                    color = colors.textSecondary,
-                    fontSize = 12.sp,
-                )
-                Spacer(Modifier.weight(1f))
-                Text(stringResource(R.string.nodes_summary_tap_close), color = colors.textTertiary, fontSize = 10.sp)
-            }
-            if (summary.okCount > 0) {
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    stringResource(
-                        R.string.nodes_summary_delays_fmt,
-                        summary.minMs,
-                        summary.p50,
-                        summary.p95,
-                        summary.maxMs,
-                    ),
-                    color = colors.textTertiary,
-                    fontSize = 12.sp,
-                    fontFamily = FontFamily.Monospace,
-                )
-            }
-            if (summary.skippedUdp > 0) {
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    stringResource(R.string.nodes_summary_skipped_udp_fmt, summary.skippedUdp),
-                    color = colors.warning,
-                    fontSize = 11.sp,
-                )
-            }
-            if (summary.failNote != null) {
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    stringResource(R.string.nodes_summary_fail_reason_fmt, summary.failNote),
-                    color = if (summary.okCount == 0) colors.danger else colors.textTertiary,
-                    fontSize = 11.sp,
-                )
-            }
-        }
-    }
-}
-
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun NodeRow(
     item: NodeEntry,
     delay: Int,
     selected: Boolean,
+    pending: Boolean,
     onClick: () -> Unit,
     onLongPress: () -> Unit,
 ) {
@@ -816,6 +713,8 @@ private fun NodeRow(
             }
             if (isGroupItem(item)) {
                 Text("›", color = colors.textTertiary, fontSize = 18.sp)
+            } else if (pending) {
+                TestingSpinner()
             } else {
                 DelayBadge(delay, tested = item.testedAt > 0)
             }
@@ -829,6 +728,7 @@ private fun NodeGridCell(
     item: NodeEntry,
     delay: Int,
     selected: Boolean,
+    pending: Boolean,
     onClick: () -> Unit,
     onLongPress: () -> Unit,
 ) {
@@ -907,11 +807,15 @@ private fun NodeGridCell(
                 }
             }
             if (!isGroupItem(item)) {
-                DelayBadge(
-                    delay = delay,
-                    modifier = Modifier.align(Alignment.End),
-                    tested = item.testedAt > 0,
-                )
+                if (pending) {
+                    TestingSpinner(modifier = Modifier.align(Alignment.End))
+                } else {
+                    DelayBadge(
+                        delay = delay,
+                        modifier = Modifier.align(Alignment.End),
+                        tested = item.testedAt > 0,
+                    )
+                }
             }
         }
     }
@@ -1082,6 +986,33 @@ private fun DetailRow(label: String, value: String) {
             maxLines = if (value.length > 60) 8 else 2,
             overflow = TextOverflow.Ellipsis,
             textAlign = androidx.compose.ui.text.style.TextAlign.End,
+        )
+    }
+}
+
+/** Per-node in-run spinner that replaces the delay badge while testing. */
+@Composable
+private fun TestingSpinner(modifier: Modifier = Modifier) {
+    val color = LocalInterstellarColors.current.primary
+    val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = "nodeSpin")
+    val sweep by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            androidx.compose.animation.core.tween(750, easing = androidx.compose.animation.core.LinearEasing),
+        ),
+        label = "nodeSpinA",
+    )
+    androidx.compose.foundation.Canvas(modifier = modifier.size(14.dp)) {
+        drawArc(
+            color = color,
+            startAngle = sweep,
+            sweepAngle = 270f,
+            useCenter = false,
+            style = androidx.compose.ui.graphics.drawscope.Stroke(
+                2.dp.toPx(),
+                cap = androidx.compose.ui.graphics.StrokeCap.Round,
+            ),
         )
     }
 }

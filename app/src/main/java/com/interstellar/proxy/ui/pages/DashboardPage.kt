@@ -267,7 +267,7 @@ fun DashboardPage(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
-                        .clickable { viewModel.urlTest(ConfigBuilder.GROUP_TAG) }
+                        .clickable { viewModel.urlTest(null) }
                         .padding(horizontal = 8.dp, vertical = 2.dp),
                 )
             } else {

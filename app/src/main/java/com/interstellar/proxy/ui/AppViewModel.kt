@@ -229,6 +229,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     /** True while the in-flight kernel url-test run belongs to the manual button. */
     @Volatile private var kernelTestManual = false
 
+    /** Member tags the in-flight kernel run covers (null = full outbound set). */
+    @Volatile private var kernelTestScopeTags: Set<String>? = null
+
     /** sing-box's per-node url-test HTTP timeout (constant.TCPTimeout, hardcoded in the kernel). */
     private val PER_NODE_TEST_TIMEOUT_MS = 15_000L
 
@@ -324,16 +327,26 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         return _groups.value.find { it.tag == GROUP_TAG }?.selected?.takeIf { it.isNotBlank() }
     }
 
-    /** sing-box/mihomo: group url-test + settle; Xray has no API → null. */
+    /** sing-box/mihomo: one REST batch (libbox command fallback); Xray has no API → null. */
     private suspend fun requestKernelGroupDelays(): Map<String, Int>? {
         return when (Settings.coreKind) {
             CoreKind.SINGBOX -> {
-                if (!runKernelUrlTest(manual = false)) return null
-                _delays.value
+                // REST batch first — one bounded call; the libbox command +
+                // stream settle stays as fallback
+                val result = clashApi.groupDelay(ConfigBuilder.AUTO_TAG)
+                if (result != null) {
+                    applyDelays(result)
+                    _delays.value
+                } else if (runKernelUrlTest(manual = false)) {
+                    _delays.value
+                } else {
+                    null
+                }
             }
 
             CoreKind.MIHOMO -> {
-                clashApi.groupDelay(ConfigBuilder.AUTO_TAG) ?: return null
+                val result = clashApi.groupDelay(ConfigBuilder.AUTO_TAG) ?: return null
+                applyDelays(result)
                 _delays.value
             }
 
@@ -510,11 +523,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 _delays.value = map
                 // url-test progress: count results stamped after this run
                 // started. Only the manual run owns the UI state — smart
-                // runs settle silently underneath.
+                // runs settle silently underneath. A scoped run (region-tab
+                // test) settles over its own members; a full run over the
+                // whole outbound snapshot.
                 if (testStartEpoch > 0) {
-                    val done = outbounds.count { it.urlTestTime >= testStartEpoch }
-                    val prevTotal = _testProgress.value?.second ?: 0
-                    val total = maxOf(prevTotal, outbounds.size)
+                    val scope = kernelTestScopeTags
+                    val done: Int
+                    val total: Int
+                    if (scope != null) {
+                        done = outbounds.count { it.tag in scope && it.urlTestTime >= testStartEpoch }
+                        total = scope.size
+                    } else {
+                        done = outbounds.count { it.urlTestTime >= testStartEpoch }
+                        val prevTotal = _testProgress.value?.second ?: 0
+                        total = maxOf(prevTotal, outbounds.size)
+                    }
                     if (total > 0) {
                         if (done >= total) {
                             testStartEpoch = 0
@@ -916,11 +939,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun parseClashGroups(yaml: String): List<CoreGroup> {
         val json = com.interstellar.proxy.data.subscription.YamlToJson.convert(yaml) ?: return emptyList()
         val groups = json.arr("proxy-groups") ?: return emptyList()
+        // normalize clash yaml type spellings onto the live-API forms, so a
+        // stopped raw config classifies groups exactly like a running core
+        // (isGroupItem / ⚡ tabs / member filtering all key off these)
+        fun normType(raw: String) = when (raw.lowercase()) {
+            "select" -> "selector"
+            "url-test" -> "urltest"
+            "load-balance" -> "loadbalance"
+            else -> raw.lowercase()
+        }
         // members that reference another group get that group's type, so the
         // nodes page can render them as group cards while the core is stopped
         val typeByName = groups.mapNotNull { el ->
             (el as? kotlinx.serialization.json.JsonObject)?.let { g ->
-                g.str("name")?.let { it to (g.str("type") ?: "select").lowercase() }
+                g.str("name")?.let { it to normType(g.str("type") ?: "select") }
             }
         }.toMap()
         return groups.mapNotNull { el ->
@@ -928,7 +960,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val name = g.str("name") ?: return@mapNotNull null
             CoreGroup(
                 tag = name,
-                type = (g.str("type") ?: "select").lowercase(),
+                type = normType(g.str("type") ?: "select"),
                 // runtime state unknown while stopped — highlight nothing
                 selected = null,
                 items = (g.strList("proxies") ?: emptyList()).map {
@@ -1106,6 +1138,60 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * A node tap inside a group tab whose nodes the main selector doesn't
+     * carry (raw airport configs): pin the node inside the group's own
+     * selector, then route the main selector through the group — traffic
+     * rides the tapped node and the stored selection lands on the group.
+     */
+    fun selectNodeViaGroup(groupTag: String, nodeTag: String) {
+        val mainTag = wholePoolMainSelector() ?: ConfigBuilder.GROUP_TAG
+        Settings.selectedOutboundTag = groupTag
+        _selectedOutboundTag.value = groupTag
+        refreshSplitRuleStatus()
+        // a concrete pick always exits smart mode
+        smartEngine.stop()
+        viewModelScope.launch(Dispatchers.IO) {
+            if (_status.value == Status.Started) {
+                when (Settings.coreKind) {
+                    CoreKind.MIHOMO -> {
+                        val okGroup = runCatching { clashApi.select(groupTag, nodeTag) }.getOrDefault(false)
+                        val okMain = runCatching { clashApi.select(mainTag, groupTag) }.getOrDefault(false)
+                        if (!okGroup && !okMain) {
+                            _message.value = str(com.interstellar.proxy.R.string.vm_switch_failed_api)
+                        }
+                        runCatching { pollMihomoOnce() }
+                    }
+
+                    CoreKind.SINGBOX -> runCatching {
+                        CommandTarget.standaloneClient().selectOutbound(groupTag, nodeTag)
+                        CommandTarget.standaloneClient().selectOutbound(mainTag, groupTag)
+                    }.onFailure {
+                        _message.value = str(com.interstellar.proxy.R.string.vm_switch_failed, it.message ?: "")
+                    }
+
+                    // Xray has no groups — the tab never exists under Xray
+                    CoreKind.XRAY -> Unit
+                }
+            } else {
+                // stopped: bake main→group into the regenerated config and
+                // refresh the static groups so the page reflects it at once
+                val config = SubscriptionRepository.regenerateActiveConfig()
+                if (config != null) {
+                    _staticGroups.value = parseStaticGroups(config, Settings.coreKind)
+                }
+                _selectedOutboundTag.value = Settings.selectedOutboundTag
+            }
+        }
+    }
+
+    /** The main selector as the configs name it (generated tag, else first selector). */
+    private fun wholePoolMainSelector(): String? =
+        _staticGroups.value.find { it.tag == ConfigBuilder.GROUP_TAG }?.tag
+            ?: _groups.value.find { it.tag == ConfigBuilder.GROUP_TAG }?.tag
+            ?: _staticGroups.value.firstOrNull { it.type.equals("selector", ignoreCase = true) }?.tag
+            ?: _groups.value.firstOrNull { it.type.equals("selector", ignoreCase = true) }?.tag
+
     fun setSplitRulesEnabled(enabled: Boolean) {
         Settings.splitRulesEnabled = enabled
         refreshSplitRuleStatus()
@@ -1166,44 +1252,49 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    fun urlTest(groupTag: String) {
+    /**
+     * Batch url-test. [groupTag] names the kernel-side group to test — a
+     * region tab passes its group so only that group's nodes run; null (or
+     * the main selector) tests the whole pool via [wholePoolTestTag].
+     * [scopeTags] limits progress/summary/ping accounting to the given
+     * member tags; derived from the group when omitted.
+     */
+    fun urlTest(groupTag: String?, scopeTags: List<String>? = null) {
         if (_testing.value) return
         _testing.value = true
-        _testProgress.value = 0 to urlTestTotal()
+        val scope = scopeTags?.takeIf { it.isNotEmpty() }
+            ?: groupTag?.let { groupMemberTags(it) }?.takeIf { it.isNotEmpty() }
+        _testProgress.value = 0 to urlTestTotal(scope)
         viewModelScope.launch(Dispatchers.IO) {
             try {
+                val kernelTag = groupTag ?: wholePoolTestTag()
                 if (_status.value == Status.Started) {
                     when (Settings.coreKind) {
-                        CoreKind.MIHOMO -> {
-                            val result = clashApi.groupDelay(groupTag)
-                            if (result != null) {
-                                _delays.value = _delays.value.toMutableMap().also { map ->
-                                    result.forEach { (name, delay) -> map[name] = delay }
-                                }
-                                _testProgress.value = result.size to result.size
+                        // app-driven per-node probes with bounded concurrency
+                        // — the kernel's batch endpoint fires every member at
+                        // once, the herd saturates the radio and inflates the
+                        // numbers (fast nodes read hundreds of ms). Waves of
+                        // 12 keep the values honest and stream in one by one.
+                        // The libbox command + stream settle stays as the
+                        // sing-box fallback when the REST API is unreachable.
+                        CoreKind.MIHOMO, CoreKind.SINGBOX -> {
+                            val members = restTestMembers(kernelTag)
+                            if (!members.isNullOrEmpty()) {
+                                restUrlTestPerNode(members)
+                            } else if (Settings.coreKind == CoreKind.SINGBOX &&
+                                runKernelUrlTest(manual = true, groupTag = kernelTag, scopeTags = scope)
+                            ) {
+                                // settled through the outbounds stream
                             } else {
                                 _message.value = str(com.interstellar.proxy.R.string.vm_test_failed_api)
                             }
                         }
 
-                        // no API — TCP ping the pool directly, no core involved
-                        CoreKind.XRAY -> tcpPingPool()
-
-                        CoreKind.SINGBOX -> {
-                            // test the AUTO urltest group (members = every node
-                            // tag), not the selector: the selector's mixed
-                            // group+node items get skipped wholesale by the
-                            // kernel's per-item pass — that's the "大量未测"
-                            // at the bottom. Mirrors the mihomo path
-                            // (groupDelay(AUTO_TAG)) and the disconnected path.
-                            if (!runKernelUrlTest(manual = true)) {
-                                _message.value = str(com.interstellar.proxy.R.string.vm_test_failed_send)
-                            }
-                        }
+                        // no API — TCP ping the pool (or the scoped slice) directly
+                        CoreKind.XRAY -> tcpPingPool(scope)
                     }
-                    if (Settings.coreKind == CoreKind.MIHOMO) delay(12_000)
                 } else {
-                    runDisconnectedUrlTest()
+                    runDisconnectedUrlTest(kernelTag, scope)
                 }
             } catch (e: Exception) {
                 _message.value = str(com.interstellar.proxy.R.string.vm_test_failed, e.message ?: "")
@@ -1215,8 +1306,85 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Denominator for the batch progress: live group size → known delays → pool size. */
-    private fun urlTestTotal(): Int {
+    private fun applyDelays(result: Map<String, Int>) {
+        _delays.value = _delays.value.toMutableMap().also { map ->
+            result.forEach { (name, delay) -> map[name] = delay }
+        }
+    }
+
+    /**
+     * Node members of [groupTag] the REST surface can probe individually —
+     * group-type members (selector/urltest/fallback/…) are skipped, they
+     * aren't real outbounds. Null = REST API unreachable or the group
+     * unknown (caller falls back to the kernel path).
+     */
+    private suspend fun restTestMembers(groupTag: String): List<String>? {
+        if (clashApi.version() == null) return null
+        val items = _groups.value.find { it.tag == groupTag }?.items
+            ?: _staticGroups.value.find { it.tag == groupTag }?.items
+            ?: return null
+        val groupTypes = setOf("selector", "urltest", "fallback", "loadbalance", "relay")
+        return items.map { it.tag to it.type.lowercase() }
+            .filter { (_, type) -> type !in groupTypes }
+            .map { (tag, _) -> tag }
+    }
+
+    /**
+     * Per-node /proxies/{name}/delay probes in waves of 12: the kernel's
+     * own batch endpoint launches every member simultaneously and the
+     * thundering herd inflates each measurement (a 100ms node reads
+     * 700ms); bounded waves keep the numbers honest and each result
+     * streams into [delays] the moment it lands.
+     */
+    private suspend fun restUrlTestPerNode(tags: List<String>) {
+        val total = tags.size
+        val done = java.util.concurrent.atomic.AtomicInteger()
+        val semaphore = kotlinx.coroutines.sync.Semaphore(12)
+        kotlinx.coroutines.coroutineScope {
+            tags.forEach { tag ->
+                launch {
+                    semaphore.withPermit {
+                        val delayMs = clashApi.proxyDelay(tag)
+                        delaysMutex.withLock {
+                            _delays.value = _delays.value.toMutableMap().also { map ->
+                                map[tag] = delayMs ?: TIMEOUT_DELAY
+                            }
+                        }
+                        _testProgress.value = done.incrementAndGet() to total
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Kernel-side tag a whole-pool run should test: AUTO when the config
+     * carries our urltest-all group (its flat member list IS every node),
+     * else the main selector itself — raw configs name theirs anything, and
+     * a partial pass over it beats a command against a group that doesn't
+     * exist.
+     */
+    private fun wholePoolTestTag(): String {
+        val live = _groups.value
+        val static = _staticGroups.value
+        if (live.any { it.tag == ConfigBuilder.AUTO_TAG } || static.any { it.tag == ConfigBuilder.AUTO_TAG }) {
+            return ConfigBuilder.AUTO_TAG
+        }
+        return static.find { it.tag == ConfigBuilder.GROUP_TAG }?.tag
+            ?: live.find { it.tag == ConfigBuilder.GROUP_TAG }?.tag
+            ?: static.firstOrNull { it.type.equals("selector", ignoreCase = true) }?.tag
+            ?: live.firstOrNull { it.type.equals("selector", ignoreCase = true) }?.tag
+            ?: ConfigBuilder.AUTO_TAG
+    }
+
+    /** Members of a group as the live core sees it, falling back to the static parse. */
+    private fun groupMemberTags(tag: String): List<String>? =
+        _groups.value.find { it.tag == tag }?.items?.map { it.tag }
+            ?: _staticGroups.value.find { it.tag == tag }?.items?.map { it.tag }
+
+    /** Denominator for the batch progress: scope → live group size → known delays → pool size. */
+    private fun urlTestTotal(scope: List<String>?): Int {
+        scope?.takeIf { it.isNotEmpty() }?.let { return it.size }
         _groups.value.find { it.tag == GROUP_TAG }?.let { group ->
             if (group.items.isNotEmpty()) return group.items.size
         }
@@ -1236,13 +1404,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
      * margin — wait for the stream's done>=total clear, capped at 15s+10s.
      * No independent overall-stall heuristic.
      */
-    private suspend fun awaitUrlTestSettled(capMs: Long = PER_NODE_TEST_TIMEOUT_MS + 10_000) {
-        val deadline = System.currentTimeMillis() + capMs
-        while (System.currentTimeMillis() < deadline && testStartEpoch > 0) {
-            delay(500)
-        }
-    }
-
     /**
      * One kernel url-test run over the AUTO group, serialized between the
      * manual button and the smart engine: both send the same command, and
@@ -1251,22 +1412,29 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
      * run epoch, sends the command, then waits for the outbounds stream to
      * report every member stamped after the epoch — bounded by the kernel's
      * per-node timeout plus margin. False = the command could not be sent.
+     * Fallback path only — the clash REST batch is the primary route.
      */
-    private suspend fun runKernelUrlTest(manual: Boolean): Boolean =
+    private suspend fun runKernelUrlTest(
+        manual: Boolean,
+        groupTag: String = ConfigBuilder.AUTO_TAG,
+        scopeTags: List<String>? = null,
+    ): Boolean =
         kernelUrlTestMutex.withLock {
             kernelTestManual = manual
+            kernelTestScopeTags = scopeTags?.toSet()
             testStartEpoch = System.currentTimeMillis() / 1000
             if (manual) {
                 // a colliding run's settle may have flashed these off while
                 // this caller was waiting on the mutex
                 _testing.value = true
-                _testProgress.value = 0 to urlTestTotal()
+                _testProgress.value = 0 to (scopeTags?.takeIf { it.isNotEmpty() }?.size ?: urlTestTotal(null))
             }
             val ok = runCatching {
-                CommandTarget.standaloneClient().urlTest(ConfigBuilder.AUTO_TAG)
+                CommandTarget.standaloneClient().urlTest(groupTag)
             }.isSuccess
             if (!ok) {
                 testStartEpoch = 0
+                kernelTestScopeTags = null
                 return@withLock false
             }
             val deadline = System.currentTimeMillis() + PER_NODE_TEST_TIMEOUT_MS + 10_000
@@ -1277,70 +1445,47 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * Spin up the core without TUN so url-test can run while the UI stays
-     * 未连接. Restores the previous config afterwards.
+     * 未连接 — scoped to [groupTag]'s members when a region tab asked.
+     * Restores the previous config afterwards.
      */
-    private suspend fun runDisconnectedUrlTest() {
+    private suspend fun runDisconnectedUrlTest(groupTag: String, scope: List<String>?) {
         // Xray delay = direct TCP pings; spinning a headless core buys nothing
         if (Settings.coreKind == CoreKind.XRAY) {
-            tcpPingPool()
+            tcpPingPool(scope)
             return
         }
         probing = true
         probeSocketUp = false
         val previous = ConfigStore.readActiveConfig()
-        val isMihomo = Settings.coreKind == CoreKind.MIHOMO
         try {
-            val probe = SubscriptionRepository.regenerateActiveConfig(includeTun = false)
+            SubscriptionRepository.regenerateActiveConfig(includeTun = false)
                 ?: throw IllegalStateException(
                     SubscriptionRepository.lastConfigError
                         ?: str(com.interstellar.proxy.R.string.vm_no_test_config),
                 )
             com.interstellar.proxy.bg.BoxService.startHeadless()
-            if (isMihomo) {
-                // wait for the Clash REST API instead of the libbox socket
-                var connected = false
-                for (i in 0 until 150) {
-                    delay(200)
-                    if (_status.value == Status.Starting || _status.value == Status.Started) return
-                    if (runCatching { clashApi.version() }.getOrNull() != null) {
-                        connected = true
-                        break
-                    }
+            // both kernels' configs force clash_api on the fixed port — wait
+            // for the REST surface, then one bounded batch call settles the
+            // whole run. No command socket, no stream-settle deadline.
+            var connected = false
+            for (i in 0 until 150) { // 150 × 200ms = 30s budget
+                delay(200)
+                if (_status.value == Status.Starting || _status.value == Status.Started) return
+                if (clashApi.version() != null) {
+                    connected = true
+                    break
                 }
-                if (!connected) throw IllegalStateException(str(com.interstellar.proxy.R.string.vm_test_service_timeout))
-                val result = clashApi.groupDelay(ConfigBuilder.AUTO_TAG)
-                    ?: throw IllegalStateException(str(com.interstellar.proxy.R.string.vm_test_cmd_failed))
-                _delays.value = _delays.value.toMutableMap().also { map ->
-                    result.forEach { (name, delay) -> map[name] = delay }
-                }
-                delay(1_000)
+            }
+            if (!connected) throw IllegalStateException(str(com.interstellar.proxy.R.string.vm_test_service_timeout))
+            // per-node waves (honest numbers, streaming results); one server
+            // batch as fallback for group shapes without bare node members
+            val members = restTestMembers(groupTag)
+            if (!members.isNullOrEmpty()) {
+                restUrlTestPerNode(members)
             } else {
-                commandClient.connect()
-                // Wait for the command socket. Cold boot (FGS scheduling, rule-set
-                // init) can take well over 6s — probing a raw command client is a
-                // slow-failing gRPC dial, so key off our own connection instead.
-                var connected = false
-                for (i in 0 until 150) { // 150 × 200ms = 30s budget
-                    delay(200)
-                    if (_status.value == Status.Starting || _status.value == Status.Started) return
-                    if (probeSocketUp) {
-                        connected = true
-                        break
-                    }
-                    // a failed dial is not retried inside CommandClient — re-kick it
-                    if (i > 0 && i % 10 == 0) commandClient.connect()
-                }
-                if (!connected) throw IllegalStateException(str(com.interstellar.proxy.R.string.vm_test_service_timeout))
-                kernelTestManual = true // manual run: progress + settle own the UI state
-                testStartEpoch = System.currentTimeMillis() / 1000
-                val ok = runCatching {
-                    CommandTarget.standaloneClient().urlTest(ConfigBuilder.AUTO_TAG)
-                }.isSuccess
-                if (!ok) throw IllegalStateException(str(com.interstellar.proxy.R.string.vm_test_cmd_failed))
-                // bounded by the kernel's per-node timeout (15s) + margin —
-                // a fixed 10s here used to cut the headless core mid-run and
-                // leave the bottom nodes 未测
-                awaitUrlTestSettled()
+                val result = clashApi.groupDelay(groupTag)
+                    ?: throw IllegalStateException(str(com.interstellar.proxy.R.string.vm_test_cmd_failed))
+                applyDelays(result)
             }
         } finally {
             probeSocketUp = false
@@ -1374,9 +1519,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
      * UDP-only protocols (hysteria2/tuic/wireguard/quic) can't be TCP-pinged
      * and are skipped with a note. Sockets bypass our own tun via
      * [DirectPing] — a plain connect would handshake with the local tun
-     * stack (~3-4ms) while the VPN is up.
+     * stack (~3-4ms) while the VPN is up. [scopeTags] narrows the sweep to
+     * a group tab's members (null = whole pool).
      */
-    fun tcpPingPool() {
+    fun tcpPingPool(scopeTags: List<String>? = null) {
         if (_pinging.value) return
         _pinging.value = true
         viewModelScope.launch(Dispatchers.IO) {
@@ -1394,14 +1540,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     showToast(str(com.interstellar.proxy.R.string.vm_no_nodes_to_test), UiToast.Kind.Error)
                     return@launch
                 }
+                val scope = scopeTags?.takeIf { it.isNotEmpty() }?.toSet()
+                val members = pool.zip(ConfigBuilder.tagsFor(pool))
+                    .filter { (_, tag) -> scope == null || tag in scope }
+                if (members.isEmpty()) {
+                    showToast(str(com.interstellar.proxy.R.string.vm_no_nodes_to_test), UiToast.Kind.Error)
+                    return@launch
+                }
                 val udpOnly = setOf(
                     com.interstellar.proxy.data.model.NodeType.HYSTERIA2,
                     com.interstellar.proxy.data.model.NodeType.TUIC,
                     com.interstellar.proxy.data.model.NodeType.WIREGUARD,
                 )
-                val pairs = pool.zip(ConfigBuilder.tagsFor(pool))
-                    .filter { (node, _) -> node.type !in udpOnly && node.network != "quic" }
-                val skippedUdp = pool.size - pairs.size
+                val pairs = members.filter { (node, _) -> node.type !in udpOnly && node.network != "quic" }
+                val skippedUdp = members.size - pairs.size
                 if (pairs.isEmpty()) {
                     lastPingReport = PingReport(0, skippedUdp, emptyMap())
                     showToast(str(com.interstellar.proxy.R.string.vm_all_udp), UiToast.Kind.Error)
